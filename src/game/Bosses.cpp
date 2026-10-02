@@ -178,12 +178,133 @@ struct BossCopter : Craft {
     }
 };
 
+// ---------------------------------------------------------------------------------
+// Battleship (0x439e60): sails in from the right with four sweeping gun turrets and
+// launches homing missiles from the stern.
+// ---------------------------------------------------------------------------------
+
+// Gun turret (0x43a1c0). Guns 0/1 sweep the front arc, guns 2/3 the rear arc.
+struct BattleGun : BossPart {
+    int index;
+    double sweep, sweepSpeed;
+    BattleGun(Board& bd, Craft& owner, int idx, double hp_, const BossTurretDef& d, double ox_, double oy_)
+        : BossPart(bd, owner, Grid("Images/battleship/gun", 21), hp_, ox_, oy_, d.fireInterval),
+          index(idx), sweep(d.speed), sweepSpeed(d.speed) {
+        frame = 10.0;
+    }
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Update();
+        x = (int)boss.x + ox;
+        y = (int)boss.y + oy;
+        vx = boss.vx;
+        vy = boss.vy;
+        hittable = true;
+        int cols = img ? img->cols : 21;
+        frame += sweep;
+        if (index < 2) {
+            if (frame >= cols) { frame = cols - 1; sweep = -sweepSpeed; }
+            else if (frame < 7.0) { frame = 7.0; sweep = sweepSpeed; }
+        } else {
+            if (frame >= cols / 2 + 4) { frame = cols / 2 + 3; sweep = -sweepSpeed; }
+            else if (frame < 0.0) { frame = 0.0; sweep = sweepSpeed; }
+        }
+        timer = b.TankDead() ? fireDelay : timer - 1;
+        if (timer < 1 && boss.y > 50.0 && !b.TankDead() && b.NukeFlash() == 0.0 && !b.BossDying()) {
+            double a = frame / (cols * 0.6369426751592356) + 0.7854;
+            // Twin barrels: one shrapnel shell from each (the volley count is not recoverable
+            // from the decompiled loop; two matches the double-barrel sprite).
+            for (int k = 0; k < 13; k += 12) {
+                Board::Bullet s;
+                s.x = (frame - 10.0) * 2.0 + x - k;
+                s.y = y - 17.0;
+                s.vx = std::cos(a) * -3.75;
+                s.vy = std::sin(a) * -3.75;
+                s.gravity = 0.05;
+                s.enemy = true;
+                s.img = TextureManager::Get("bombfrag");
+                b.Bullets().push_back(s);
+                b.AddMuzzleFlash(s.x, s.y, 0.0, 0.0);
+                b.SpawnParticles(TextureManager::Get("smoke"), s.x, s.y - 20.0, -0.5, 0.0, 4, 0.5, -0.01, -0.5, 100, true, -1);
+            }
+            AudioSystem::PlaySoundId(SND_ENEMYTANKGUN, b.Pan(x));
+            timer = fireDelay;
+        }
+    }
+};
+
+struct Battleship : Craft {
+    Texture* hull;
+    BattleGun* guns[4] = {};
+    int launchTimer, launchDelay;
+    Battleship(Board& bd) : Craft(bd, 0, "pupcopter") {
+        img = Grid("Images/battleship/main", 1);
+        hull = Grid("Images/battleship/hull", 1);
+        const BossLevelDef* st = Stats(b, "Battleship");
+        hp = maxHp = st ? st->armor : 800;
+        points = 25000;   // the constructor overrides the XML score
+        boss = true;
+        persistent = true;
+        hittable = false;
+        x = 770.0;
+        y = 260.0;
+        vx = -1.0;
+        launchDelay = launchTimer = (st && !st->launchers.empty()) ? st->launchers[0].fireInterval : 250;
+        static const double kOffset[4][2] = { { -219.0, 51.0 }, { -306.0, 47.0 }, { 219.0, 49.0 }, { 306.0, 43.0 } };
+        for (int i = 0; i < 4; ++i) {
+            BossTurretDef td = (st && i < (int)st->turrets.size()) ? st->turrets[i] : BossTurretDef();
+            auto g = std::make_unique<BattleGun>(b, *this, i, st ? st->turretArmor : 200, td, kOffset[i][0], kOffset[i][1]);
+            guns[i] = g.get();
+            b.AddPart(std::move(g));
+        }
+    }
+    bool GunAlive(int i) {
+        for (auto& c : b.Crafts()) {
+            if (c.get() == guns[i] && !c->dead) return true;
+        }
+        return false;
+    }
+    void UpdateF() override {}
+    void Update() override {
+        Craft::Update();
+        x += vx;
+        // Sail in and stop near the middle; with both bow guns gone, press on to the left.
+        if (!GunAlive(0) && !GunAlive(1)) {
+            if (x <= -50.0) vx = std::min(vx + 0.005, 0.0);
+            else vx -= 0.005;
+        } else if (x < 240.0) {
+            vx = std::min(vx + 0.005, 0.0);
+        }
+        vx = std::clamp(vx, -1.0, 1.0);
+        if (vx == 0.0) hittable = true;
+
+        if (launchTimer != 0) --launchTimer;
+        if (b.TankDead()) launchTimer = launchDelay;
+        if (vx == 0.0 && launchTimer == 0 && b.NukeFlash() == 0.0 && !b.BossDying()) {
+            FireMissile(b, (int)(x >= 0.0 ? x - 120.0 : x + 120.0), 300, 0.0, 0.0, 0.75);
+            launchTimer = launchDelay;
+        }
+    }
+    void Draw() override {
+        if (b.Progress() < b.Length()) return;
+        Gfx::DrawSprite(hull, (int)x, (int)(y + 89.0), true);
+        Craft::Draw();
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+    }
+};
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
     int kind = (mission == 18) ? 9 : mission % 9;
     switch (kind) {
         case 0: return std::make_unique<BossCopter>(b);
+        case 1: return std::make_unique<Battleship>(b);
         default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
     }
 }

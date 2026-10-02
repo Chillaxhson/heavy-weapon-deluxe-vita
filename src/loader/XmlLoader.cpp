@@ -201,7 +201,9 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
             lvlElem->QueryIntAttribute("fire", &bLevel.fireInterval);
 
             // Turrets
-            for (XMLElement* tElem = lvlElem->FirstChildElement("Turret"); tElem != nullptr; tElem = tElem->NextSiblingElement("Turret")) {
+            // "Turret" (helicopter) or numbered "Turret1".."Turret4" (battleship).
+            for (XMLElement* tElem = lvlElem->FirstChildElement(); tElem != nullptr; tElem = tElem->NextSiblingElement()) {
+                if (std::string(tElem->Name()).rfind("Turret", 0) != 0) continue;
                 BossTurretDef turret;
                 tElem->QueryIntAttribute("armor", &turret.armor);
                 tElem->QueryIntAttribute("fire", &turret.fireInterval);

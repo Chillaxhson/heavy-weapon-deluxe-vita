@@ -66,6 +66,6 @@
 - [x] Configured VitaSDK CMake build pipeline with all dependencies (`SDL2`, `SDL2_image`, `SDL2_mixer`, `vitaGL`, `vitashark`, `mathneon`, `libpng`, `libjpeg`, `libwebp`, `tinyxml2`).
 - [x] Discovered and resolved PopCap's XML designer typo in `Anims.xml` (`nuke="yes"/ rare="yes">`) via automatic in-memory XML preparation.
 - [x] Added automated unit test suite (`tests/test_xml_loader.cpp`) verifying 21 craft types, 19 missions, 84 waves, 10 bosses, and 60 ambient animations with 100% pass rate.
-- [x] Successfully compiled and packaged `HeavyWeaponDeluxe.vpk` (3.2 MB) in containerized VitaSDK.
-- [x] Created `README.md` and `CONTEXT.md` documentation.
+- [x] Resolved VitaShell error `0x8010113D` by converting all LiveArea PNGs (`icon0.png`, `bg.png`, `startup.png`) to 8-bit indexed colormap format as strictly required by Sony SceAppMgr.
+- [x] Successfully recompiled and packaged `HeavyWeaponDeluxe.vpk` (2.9 MB) with compliant LiveArea assets.
 - [x] Synchronized all updates with GitHub repository.

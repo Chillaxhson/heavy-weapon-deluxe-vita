@@ -107,9 +107,11 @@ target_link_libraries(heavyweapon
     -Wl,--end-group
 )
 
-vita_create_self(heavyweapon.velf heavyweapon UNSAFE)
+# The signed SELF must not share the .velf name: vita.cmake writes the intermediate
+# VELF to heavyweapon.velf, and a parallel build could then pack the unsigned file.
+vita_create_self(heavyweapon.self heavyweapon UNSAFE)
 
-vita_create_vpk(HeavyWeaponDeluxe.vpk ${VITA_TITLEID} heavyweapon.velf
+vita_create_vpk(HeavyWeaponDeluxe.vpk ${VITA_TITLEID} heavyweapon.self
     NAME ${VITA_APP_NAME}
     FILE sce_sys/icon0.png sce_sys/icon0.png
     FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png

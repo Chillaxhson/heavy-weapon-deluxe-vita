@@ -105,7 +105,7 @@ void DropDumbBomb(Board& b, int x, int y, double vx, double vy, bool mirror);
 void DropIronBomb(Board& b, int x, int y, double vx, double vy, bool mirror);
 void DropFragBomb(Board& b, int x, int y, double vx, double vy, bool mirror);
 void DropLaserGuidedBomb(Board& b, int x, int y, double vx, double vy, bool fromRight);
-void DropFatBoy(Board& b, int x, int y, double vx, double vy, bool mirror);
+void DropFatBoy(Board& b, int x, int y, double vx, double vy, bool mirror, bool tilted = false);
 void FireRpg(Board& b, double x, double y, bool mirror, double arc);
 void FireMissile(Board& b, int x, int y, double vx, double vy, double speedScale = 1.0);
 

@@ -93,11 +93,10 @@ void Board::Update() {
     }
 
     if (!mSurvival) {
-        // The boss arrives as the level runs out. Bosses are not ported yet, so the
-        // post-boss sequence (gas station, then the debriefing) starts straight away.
+        // The boss arrives as the level runs out (0x41b690 switch on mission % 9).
         if (mProgress == mLength - 1 && !mBoss) SpawnBoss();
-        // Bosses that are not ported yet: once the sky is clear the post-boss sequence
-        // runs as if the boss had been beaten.
+        // Safety net if no boss spawned (e.g. progress jumped past length - 1): once the
+        // sky is clear the post-boss sequence runs as if the boss had been beaten.
         if (mProgress == mLength && !mBoss && !mDeath && mCrafts.empty()) BossDefeated();
         // A mile sign passes every 5000 ticks.
         if (mProgress > 0 && mProgress < mLength && mProgress % 5000 == 0) --mMile;

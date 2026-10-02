@@ -192,6 +192,7 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
         for (int lvl = 1; lvl <= 3; ++lvl) {
             std::string lvlTag = "Level" + std::to_string(lvl);
             XMLElement* lvlElem = bossElem->FirstChildElement(lvlTag.c_str());
+            if (!lvlElem && lvl == 1) lvlElem = bossElem->FirstChildElement("Level");   // Final has one level
             if (!lvlElem) continue;
 
             BossLevelDef bLevel;
@@ -233,6 +234,9 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
             }
             if (const char* lc = lvlElem->Attribute("longchain")) bLevel.longChain = std::string(lc) == "yes";
             lvlElem->QueryDoubleAttribute("throw", &bLevel.throwSpeed);
+            if (XMLElement* e = lvlElem->FirstChildElement("Laser")) e->QueryIntAttribute("fire", &bLevel.laserFire);
+            if (XMLElement* e = lvlElem->FirstChildElement("SmallLauncher")) e->QueryIntAttribute("fire", &bLevel.smallLauncherFire);
+            if (XMLElement* e = lvlElem->FirstChildElement("BigLauncher")) e->QueryIntAttribute("fire", &bLevel.bigLauncherFire);
             lvlElem->QueryDoubleAttribute("speed", &bLevel.speed);
             lvlElem->QueryIntAttribute("boulders", &bLevel.boulders);
             for (auto [name, jump] : { std::pair<const char*, BossLevelDef::Jump*>{ "Jump", &bLevel.wormJump }, { "JumpFast", &bLevel.wormJumpFast } }) {
@@ -248,6 +252,7 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
                 bElem->QueryIntAttribute("on", &bLevel.bombOn);
                 bElem->QueryIntAttribute("off", &bLevel.bombOff);
                 bElem->QueryIntAttribute("freq", &bLevel.bombFreq);
+                bElem->QueryIntAttribute("fire", &bLevel.bombFire);
             }
             if (XMLElement* hElem = lvlElem->FirstChildElement("Hand")) {
                 hElem->QueryIntAttribute("armor", &bLevel.handArmor);

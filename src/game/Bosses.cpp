@@ -1621,12 +1621,283 @@ void RobotPart::Die() {
     if (!launcher) robot.ArmLost(index);
 }
 
+// ---------------------------------------------------------------------------------
+// Secret Weapon (0x43de30), the final boss at mission 18. Three stages, swapped at 66%
+// and 33% armour: wing lasers raining beams, then a spinning shrapnel turret with Fat
+// Boys, then homing and head missiles.
+// ---------------------------------------------------------------------------------
+
+// Wing laser beam (0x44b950): a 40-point trail that falls straight, diagonally or in a
+// zigzag; every point of it is deadly.
+struct BossLaserBeam : Hazard {
+    int pattern, dir;
+    double swing;           // +0x70
+    bool landed = false;    // +0x7c
+    std::vector<int> tx, ty;
+    BossLaserBeam(Board& bd, double x_, double y_, int pattern_, int dir_)
+        : Hazard(bd, "bombfrag", x_, y_, 0, 0, false), pattern(pattern_), dir(dir_), swing(dir_ * 0.1) {
+        active = false;
+        points = 500;
+    }
+    void Update() override {
+        if (pattern == 0) {
+            y += 3.5;
+        } else if (pattern == 1) {
+            x += dir * 3;
+            y += 3.0;
+        } else {
+            x += vx;
+            vx += swing;
+            if (vx < -5.0) swing = 0.075;
+            if (vx > 5.0) swing = -0.075;
+            y += 2.0;
+        }
+        if (y > 460.0) landed = true;   // (the original also leaves a scorch mark; not ported)
+        if (!ty.empty() && ty.front() >= 461) { Remove(); return; }
+        tx.push_back((int)x);
+        ty.push_back((int)y);
+        if (tx.size() > 40) {
+            tx.erase(tx.begin());
+            ty.erase(ty.begin());
+        }
+        if (!b.TankDead()) {
+            for (size_t i = 0; i < tx.size(); ++i) {
+                if (b.HitsTank(img, tx[i], ty[i], 0, 0, false)) {
+                    b.KillTank();
+                    break;
+                }
+            }
+        }
+    }
+    void Draw() override {
+        Gfx::SetDrawMode(1);
+        for (size_t i = 0; i < tx.size(); ++i)
+            if (ty[i] < 460) Gfx::DrawSprite(img, tx[i], ty[i], true);
+        Gfx::SetDrawMode(0);
+    }
+};
+
+struct FinalBoss : Craft {
+    Texture *body[3], *turret, *laser, *laserGlow;
+    int stage = 0;                  // +0x88
+    int timer = 80;                 // +0x8c
+    double tx = 0.0, ty = 160.0;    // +0x90 +0x98
+    int smallTimer, bigTimer, bombTimer;    // +0xa0 +0xa4 +0xa8
+    int smallDelay, bigDelay, bombDelay, turretDelay;
+    double laserPhase = 0.0;        // +0xb8
+    int lastPattern = 2;            // +0xcc
+    double anim = 0.0;              // +0xd0 laser frame / turret angle
+    double prevHp;                  // +0xd8
+    FinalBoss(Board& bd) : Craft(bd, 0, "pupcopter") {
+        body[0] = Grid("Images/finalboss/body1", 1);
+        body[1] = Grid("Images/finalboss/body2", 1);
+        body[2] = Grid("Images/finalboss/body3", 1);
+        turret = Grid("Images/finalboss/turret", 16);
+        laser = Grid("Images/finalboss/laser", 5);
+        laserGlow = Grid("Images/finalboss/laserglow", 5);
+        img = body[0];
+        const BossLevelDef* st = Stats(b, "Final");
+        hp = maxHp = prevHp = st ? st->armor : 15000;
+        points = st ? st->score : 140000;
+        smallDelay = smallTimer = st ? st->smallLauncherFire : 120;
+        bigDelay = bigTimer = st ? st->bigLauncherFire : 160;
+        bombDelay = bombTimer = st ? st->bombFire : 200;
+        turretDelay = (st && !st->turrets.empty()) ? st->turrets[0].fireInterval : 60;
+        boss = true;
+        persistent = true;
+        hittable = false;
+        x = 0.0;
+        y = -140.0;
+        vx = 0.0;
+        vy = 0.5;
+    }
+    void Flames(double ox, double oy, double dvx) {
+        b.SpawnParticles(TextureManager::Get("meteorite"), x + ox, y + oy, vx + dvx, vy + 2.0, 1, 0.5, 0, 0, 20, true, -1);
+    }
+    // 0x43c510: blow off the outer hull.
+    void StageBlast() {
+        b.SpawnExplosion(x, y, (int)((img ? img->GetCelWidth() : 300) * 1.5), (int)((img ? img->GetCelHeight() : 200) * 1.5), 0.0, 0.0, 0.02);
+        b.Shake(0x80);
+        for (int i = 0; i < 6; ++i)
+            b.SpawnParticles(TextureManager::Get("bigdebris"), x, y, 0.0, 0.0, 2, 2.0, 0.02, 4.0, 300, false, i);
+    }
+    void UpdateF() override {}
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        bool live = !b.TankDead() && hittable;
+        if (!hittable) {
+            // Descend into view first.
+            if (y > 150.0) hittable = true;
+        } else if (stage == 0) {
+            if (std::abs(x - tx) < 10.0 && std::abs(y - ty) < 10.0) {
+                if (!b.TankDead()) --timer;
+                else timer = 80;
+                if (timer < 80 && b.NukeFlash() == 0.0) {
+                    if (laserPhase == 0.0) AudioSystem::PlaySoundId(SND_BOSSLASER, b.Pan(x));
+                    if (laserPhase > 1.5 && laserPhase < 1.54) {
+                        int p;
+                        do p = Rand() % 3; while (p == lastPattern);
+                        lastPattern = p;
+                        b.AddHazard(std::make_unique<BossLaserBeam>(b, x - 156.0, y + 10.0, p, 1));
+                        b.AddHazard(std::make_unique<BossLaserBeam>(b, x + 157.0, y + 10.0, p, -1));
+                        AudioSystem::PlaySoundId(SND_BOSSLASERBLAST, b.Pan(x));
+                    }
+                }
+                if ((timer < 80 || (laserPhase > 0.0 && b.TankDead())) &&
+                    (b.NukeFlash() == 0.0 || laserPhase != 0.0) && laserPhase < 3.141592653589793) {
+                    anim += std::sin(laserPhase) * 0.5;
+                    if (anim >= 5.0) anim -= 5.0;
+                    laserPhase = std::min(laserPhase + 0.04, 3.141592653589793);
+                }
+                if (timer == 0) {
+                    do {
+                        tx = (double)(Rand() % 200) - 100.0;
+                        ty = (double)(Rand() % 40) + 140.0;
+                    } while (std::sqrt((ty - y) * (ty - y) + (tx - x) * (tx - x)) < 60.0);
+                    laserPhase = 0.0;
+                    timer = 80;
+                }
+            }
+            double dx = (tx - x) * 0.2, dy = (ty - y) * 0.2;
+            if (vx < dx) vx += 0.1;
+            if (dx < vx) vx -= 0.1;
+            if (vy < dy) vy += 0.03;
+            if (dy < vy) vy -= 0.03;
+            if (std::abs(dx) < std::abs(vx)) vx = dx;
+            if (std::abs(dy) < std::abs(vy)) vy = dy;
+        } else {
+            if (b.App().tick % 50 == 0) {
+                tx = (double)(Rand() % 400) - 200.0;
+                ty = (double)((stage + 16) * 10) + ((double)(Rand() % 40) - 20.0);
+            }
+            if (x < tx && vx < 2.0) vx += 0.04;
+            if (tx < x && vx > -2.0) vx -= 0.04;
+            if (y < ty && vy < 0.5) vy += 0.01;
+            if (ty < y && vy > -0.5) vy -= 0.01;
+        }
+
+        if (prevHp > maxHp * 0.66 && hp <= maxHp * 0.66) {
+            StageBlast();
+            stage = 1;
+            img = body[1];
+            anim = 0.0;
+            timer = turretDelay;
+        } else if (prevHp > maxHp * 0.33 && hp <= maxHp * 0.33) {
+            StageBlast();
+            stage = 2;
+            img = body[2];
+        }
+        prevHp = hp;
+        x += vx;
+        y += vy;
+        bool even = (b.App().tick & 1) == 0;
+        bool canFire = b.NukeFlash() == 0.0 && !b.BossDying();
+        live = !b.TankDead() && hittable;
+        if (stage == 0) {
+            if (even) {
+                static const double kJets[6][2] = { { 92, 105 }, { -91, 105 }, { 71, 109 }, { -70, 109 }, { 42, 110 }, { -41, 110 } };
+                for (auto& j : kJets) Flames(j[0], j[1], 0.0);
+            }
+        } else if (stage == 1) {
+            anim += 0.2;
+            if (anim >= 16.0) anim -= 16.0;
+            if (even) {
+                Flames(98.0, 20.0, 0.0);
+                Flames(-97.0, 20.0, 0.0);
+            }
+            if (live) {
+                --timer;
+                --bombTimer;
+            } else {
+                timer = turretDelay;
+                bombTimer = bombDelay;
+            }
+            if (canFire) {
+                if (bombTimer < 1) {
+                    DropFatBoy(b, (int)x, (int)(y + 100.0), vx, vy, false, true);
+                    bombTimer = bombDelay;
+                }
+                if (timer < 1) {
+                    for (double k = 0.0; k <= 3.141; k += 3.141) {
+                        double a = anim * 0.19630938358853553 + k;
+                        Board::Bullet s;
+                        s.x = std::cos(a) * 45.0 + x;
+                        s.y = (y - 84.0) - std::sin(a) * 45.0;
+                        s.vx = std::cos(a) * 2.5;
+                        s.vy = std::sin(a) * -2.5;
+                        s.gravity = 0.1;
+                        s.enemy = true;
+                        s.img = TextureManager::Get("bombfrag");
+                        b.Bullets().push_back(s);
+                        b.AddMuzzleFlash(s.x, s.y, vx, vy);
+                    }
+                    timer = turretDelay;
+                }
+            }
+        } else {
+            if (even) {
+                Flames(75.0, 64.0, 0.5);
+                Flames(-74.0, 64.0, -0.5);
+            }
+            if (live) {
+                --smallTimer;
+                --bigTimer;
+            } else {
+                smallTimer = smallDelay;
+                bigTimer = bigDelay;
+            }
+            if (canFire && smallTimer < 1) {
+                FireMissile(b, (int)(x - 84.0), (int)(y + 3.0), vx, vy, 1.0);
+                FireMissile(b, (int)(x + 85.0), (int)(y + 3.0), vx, vy, 1.0);
+                smallTimer = smallDelay;
+            }
+            if (canFire && bigTimer < 1) {
+                b.AddHazard(std::make_unique<HeadMissile>(b, x - 52.0, y - 52.0, true));
+                b.AddHazard(std::make_unique<HeadMissile>(b, x + 53.0, y - 52.0, false));
+                bigTimer = bigDelay;
+            }
+        }
+        Craft::Update();
+    }
+    void Draw() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Draw();
+        if (flash != 0) {
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(255, 255 - flash, 255 - flash);
+        }
+        if (stage == 0) {
+            Gfx::DrawSprite(laser, (int)x - 156, (int)y - 15, true, (int)anim, 0, false);
+            Gfx::DrawSprite(laser, (int)x + 157, (int)y - 15, true, (int)anim, 0, true);
+            if (laserPhase > 0.0) {
+                int g = (int)(std::sin(laserPhase) * 255.0);
+                Gfx::SetColorizeImages(true);
+                Gfx::SetDrawMode(1);
+                Gfx::SetColor(g, g, g);
+                Gfx::DrawSprite(laserGlow, (int)x - 156, (int)y - 15, true, (int)anim, 0, false);
+                Gfx::DrawSprite(laserGlow, (int)x + 157, (int)y - 15, true, (int)anim, 0, true);
+                Gfx::SetDrawMode(0);
+            }
+        } else if (stage == 1) {
+            Gfx::DrawSprite(turret, (int)x, (int)y - 84, true, (int)anim);
+        }
+        Gfx::SetColorizeImages(false);
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+    }
+};
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
-    int kind = (mission == 18) ? 9 : mission % 9;
-    switch (kind) {
-        case 0: return std::make_unique<BossCopter>(b);
+    switch (mission % 9) {
+        case 0:
+            if (mission == 18) return std::make_unique<FinalBoss>(b);
+            return std::make_unique<BossCopter>(b);
         case 1: return std::make_unique<Battleship>(b);
         case 2: return std::make_unique<Rainer>(b);
         case 3: return std::make_unique<Wrecker>(b);
@@ -1635,7 +1906,7 @@ std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
         case 6: return std::make_unique<Head>(b);
         case 7: return std::make_unique<Mechworm>(b);
         case 8: return std::make_unique<Robot>(b);
-        default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
+        default: return nullptr;
     }
 }
 

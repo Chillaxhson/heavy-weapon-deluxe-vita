@@ -353,8 +353,8 @@ void DropLaserGuidedBomb(Board& b, int x, int y, double vx, double vy, bool from
     b.AddHazard(std::make_unique<LaserGuidedBomb>(b, x, y, vx, vy, fromRight));
 }
 
-void DropFatBoy(Board& b, int x, int y, double vx, double vy, bool mirror) {
-    b.AddHazard(std::make_unique<FatBoy>(b, x, y, vx, vy, mirror, false));
+void DropFatBoy(Board& b, int x, int y, double vx, double vy, bool mirror, bool tilted) {
+    b.AddHazard(std::make_unique<FatBoy>(b, x, y, vx, vy, mirror, tilted));
 }
 
 void FireRpg(Board& b, double x, double y, bool mirror, double arc) {

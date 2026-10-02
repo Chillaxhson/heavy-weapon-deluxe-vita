@@ -568,6 +568,7 @@ struct Wrecker : Craft {
                 if (truckX < 0.5) {
                     entered = hittable = true;
                     AudioSystem::SetLoop(SND_DIESEL, false);
+                    AudioSystem::PlaySoundId(SND_AIRBRAKE, b.Pan(truckX));
                 }
             }
         }
@@ -601,7 +602,7 @@ struct Wrecker : Craft {
                 b.SpawnParticles(TextureManager::Get("rock"), ballX, 460.0, ballVx * 0.25, -2.0, 10, 1.0, 0.05, 3.0, 200, false, -1);
                 landed = true;
                 b.Shake(128);
-                AudioSystem::PlaySoundId(SND_BIGEXPLODE, b.Pan(ballX));
+                AudioSystem::PlaySoundId(SND_BIGTHUD, b.Pan(ballX));
             }
         } else {
             landed = false;
@@ -1210,6 +1211,216 @@ struct Head : Craft {
     }
 };
 
+// ---------------------------------------------------------------------------------
+// Mechworm (0x445800): a segmented worm that leaps out of the sand under the tank,
+// throwing up boulders. Three turrets on its back drop armoured bombs; once they are
+// gone it jumps faster and fires homing missiles.
+// ---------------------------------------------------------------------------------
+
+struct Mechworm;
+
+// Back turret (0x445b90): rides on segment 9, 19 or 29; the worm draws it.
+struct WormTurret : BossPart {
+    Mechworm& worm;
+    int index;
+    WormTurret(Board& bd, Mechworm& owner, Craft& asCraft, int idx, double hp_, Texture* image, int fire)
+        : BossPart(bd, asCraft, image, hp_, 0.0, 0.0, fire), worm(owner), index(idx) {
+        hittable = true;
+    }
+    void Update() override;
+    void Draw() override {}
+    void Die() override;
+};
+
+struct Mechworm : Craft {
+    static constexpr int kSegs = 30;
+    Texture *rib, *turretImg, *sand;
+    double sx[kSegs], sy[kSegs];    // +0x88 / +0x178, segment 0 is the head
+    WormTurret* turrets[3] = {};    // +0x7c
+    BossLevelDef::Jump normal, fast, cur;
+    bool fastMode = false;          // +0x2e4
+    int fireTimer, fireDelay;       // +0x2c8 +0x2a8
+    int turretFire = 60;            // +0x268
+    int boulders;                   // +0x2ac
+    int sandAlpha = 0, sandDelta = 0, sandX = 0;   // +0x2dc +0x2e0 +0x2d8
+    Mechworm(Board& bd) : Craft(bd, 0, "pupcopter") {
+        img = Grid("Images/worm/head", 10);
+        rib = Grid("Images/worm/rib", 4);
+        turretImg = Grid("Images/worm/turret", 1);
+        sand = Grid("Images/worm/sand", 4);
+        const BossLevelDef* st = Stats(b, "Worm");
+        hp = maxHp = st ? st->armor : 2000;
+        points = st ? st->score : 50000;
+        fireDelay = fireTimer = st ? st->fireInterval : 40;
+        boulders = st ? st->boulders : 8;
+        if (st) {
+            normal = st->wormJump;
+            fast = st->wormJumpFast;
+            if (!st->turrets.empty()) turretFire = st->turrets[0].fireInterval;
+        }
+        cur = normal;
+        int turretHp = (st && !st->turrets.empty()) ? st->turrets[0].armor : 500;
+        boss = true;
+        persistent = true;
+        hittable = true;
+        for (int i = 0; i < 3; ++i) {
+            auto t = std::make_unique<WormTurret>(b, *this, *this, i, turretHp, turretImg, turretFire);
+            turrets[i] = t.get();
+            b.AddPart(std::move(t));
+        }
+        Jump(true);
+    }
+    // 0x4441b0: dive back in and line up the next leap.
+    void Jump(bool first) {
+        double nx;
+        if (fastMode) nx = b.TankX();
+        else if (first) nx = -200.0;
+        else nx = (double)((Rand() & 1) * 2 - 1) * ((double)(Rand() % 160) + 100.0);
+        if (b.TankX() < -300.0) nx = 200.0;
+        for (int i = 0; i < kSegs; ++i) {
+            sx[i] = nx;
+            sy[i] = cur.depth;
+        }
+        x = nx;
+        y = cur.depth;
+        vy = -cur.jump;
+    }
+    void UpdateF() override {}
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Update();
+        bool anyTurret = turrets[0] || turrets[1] || turrets[2];
+        if (anyTurret) {
+            cur = normal;
+            fastMode = false;
+        } else {
+            cur = fast;
+            fastMode = true;
+            if (b.TankDead()) fireTimer = fireDelay;
+            else --fireTimer;
+            if (y < 280.0 && fireTimer < 1 && b.NukeFlash() == 0.0 && !b.BossDying()) {
+                FireMissile(b, (int)x, (int)y, vx, vy, 1.0);
+                fireTimer = fireDelay;
+            }
+        }
+        if (!b.BossDying()) {
+            frame += 0.3;
+            if (frame >= 10.0) frame -= 10.0;
+            sy[0] += vy;
+            if (sy[0] >= 520.0) {
+                // Underground: steer toward the tank.
+                vx = std::clamp((b.TankX() - sx[0]) * 0.01, -cur.lateral, cur.lateral);
+            } else {
+                sx[0] += vx;
+                vy = std::min(vy + cur.gravity, cur.jump);
+            }
+        } else {
+            if (b.App().tick % 50 == 0) {
+                vx = (double)(Rand() % 200) * 0.01 - 1.0 - sx[0] * 0.0015625;
+                vy = ((double)(Rand() % 200) * 0.01 - 1.0) - (sy[0] - 240.0) * 0.0020833333333333333;
+            }
+            sx[0] += vx;
+            sy[0] += vy;
+        }
+        x = sx[0];
+        y = sy[0];
+        hittable = sy[0] < 480.0;
+        if (sy[kSegs - 1] > 795.0 && sy[0] > cur.depth) Jump(false);
+        for (int i = 1; i < kSegs; ++i) {
+            sx[i] -= (sx[i] - sx[i - 1]) * 0.125;
+            sy[i] -= (sy[i] - sy[i - 1]) * 0.125;
+        }
+
+        // Sand plume while the body crosses the surface.
+        double tail = sy[kSegs - 1];
+        if ((sy[0] < 460.0 && tail >= 460.0) || (sy[0] > 460.0 && tail <= 460.0) || (sy[0] > 500.0 && vy < 0.0)) {
+            if (sandDelta != 8) {
+                sandX = (int)sx[0];
+                sandDelta = 8;
+                AudioSystem::PlaySoundId(SND_EARTHQUAKE, b.Pan(sx[0]));
+            }
+        } else {
+            sandDelta = -2;
+        }
+        if (sy[0] > 460.0 && sy[0] + vy < 460.0) {
+            for (int i = 0; i < boulders; ++i) {
+                double bvy = (double)(Rand() % 200) * 0.01 - 5.0;
+                double bvx = ((double)(Rand() % 400) * 0.01 + vx) - 2.0;
+                double bx = ((double)(Rand() % 80) + x) - 40.0;
+                b.AddHazard(std::make_unique<Boulder>(b, bx, 460.0, bvx, bvy, false));
+            }
+        }
+        sandAlpha += sandDelta;
+        if (sandAlpha >= 256) {
+            sandAlpha = 255;
+            if (b.App().tick % 5 == 0)
+                b.SpawnParticles(TextureManager::Get("sanddust"), (double)(Rand() % 100 - 50 + sandX), 500.0, 0.0, -1.0, 1, 0.5, -0.01, -1.0, 120, true, -1);
+        } else if (sandAlpha < 0) {
+            sandAlpha = 0;
+        }
+
+        // Every segment is deadly. (The original's head test passes the wrong
+        // coordinates and never hits; segment 0 covers the head anyway.)
+        if (!b.BossDying() && !b.TankDead()) {
+            for (int i = 0; i < kSegs; ++i) {
+                if (b.HitsTank(rib, (int)sx[i], (int)sy[i], 0, 0, false)) {
+                    b.KillTank();
+                    break;
+                }
+            }
+        }
+        if (b.RespawnTimer() == 2 && (y < 460.0 || tail < 460.0)) b.SetRespawnTimer(3);
+    }
+    void TurretLost(int i) { turrets[i] = nullptr; }
+    void Draw() override {
+        if (b.Progress() < b.Length()) return;
+        for (int i = kSegs - 1; i >= 0; --i) Gfx::DrawSprite(rib, (int)sx[i], (int)sy[i], true, i % 4);
+        for (WormTurret* t : turrets) {
+            if (!t) continue;
+            if (t->flash != 0) {
+                Gfx::SetColorizeImages(true);
+                Gfx::SetColor(255, 255 - t->flash, 255 - t->flash);
+            }
+            Gfx::DrawSprite(turretImg, (int)t->x, (int)t->y, true, (int)t->frame);
+            Gfx::SetColorizeImages(false);
+        }
+        Craft::Draw();
+        if (sandAlpha != 0) {
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(255, 255, 255, sandAlpha);
+            Gfx::DrawSprite(sand, sandX, 460, true, (b.App().tick / 8) % 4);
+            Gfx::SetColorizeImages(false);
+        }
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+    }
+};
+
+void WormTurret::Update() {
+    if (b.Progress() < b.Length()) return;
+    Craft::Update();
+    int seg = 9 + index * 10;
+    vx = worm.sx[seg] - x;
+    vy = worm.sy[seg] - y;
+    x = worm.sx[seg];
+    y = worm.sy[seg];
+    if (y >= 460.0) return;
+    timer = b.TankDead() ? worm.turretFire : timer - 1;
+    if (timer > 0 || y >= 280.0 || b.NukeFlash() != 0.0 || vy >= 1.0 || b.BossDying()) return;
+    timer = worm.turretFire;
+    double bvx = std::clamp((b.TankX() - x) * 0.0125, -3.0, 3.0) + (double)(Rand() % 200) * 0.01 - 1.0;
+    DropIronBomb(b, (int)x, (int)y, bvx, vy, bvx < 0.0);
+}
+
+void WormTurret::Die() {
+    BossPart::Die();
+    worm.TurretLost(index);
+}
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
@@ -1222,6 +1433,7 @@ std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
         case 4: return std::make_unique<Ape>(b);
         case 5: return std::make_unique<Eyebot>(b);
         case 6: return std::make_unique<Head>(b);
+        case 7: return std::make_unique<Mechworm>(b);
         default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
     }
 }

@@ -234,6 +234,15 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
             if (const char* lc = lvlElem->Attribute("longchain")) bLevel.longChain = std::string(lc) == "yes";
             lvlElem->QueryDoubleAttribute("throw", &bLevel.throwSpeed);
             lvlElem->QueryDoubleAttribute("speed", &bLevel.speed);
+            lvlElem->QueryIntAttribute("boulders", &bLevel.boulders);
+            for (auto [name, jump] : { std::pair<const char*, BossLevelDef::Jump*>{ "Jump", &bLevel.wormJump }, { "JumpFast", &bLevel.wormJumpFast } }) {
+                if (XMLElement* jElem = lvlElem->FirstChildElement(name)) {
+                    jElem->QueryIntAttribute("depth", &jump->depth);
+                    jElem->QueryDoubleAttribute("jump", &jump->jump);
+                    jElem->QueryDoubleAttribute("gravity", &jump->gravity);
+                    jElem->QueryDoubleAttribute("lateral", &jump->lateral);
+                }
+            }
             if (XMLElement* cElem = lvlElem->FirstChildElement("Charge")) cElem->QueryIntAttribute("delay", &bLevel.chargeDelay);
             if (XMLElement* bElem = lvlElem->FirstChildElement("Bomb")) {
                 bElem->QueryIntAttribute("on", &bLevel.bombOn);

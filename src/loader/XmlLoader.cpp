@@ -3,21 +3,54 @@
 #include <tinyxml2.h>
 #include <iostream>
 #include <algorithm>
+#include <regex>
 
 namespace HeavyWeapon {
 
 using namespace tinyxml2;
 
+// Helper to sanitize PopCap's XML (multiple root elements and designer typos)
+static std::string PrepareXml(const std::string& raw) {
+    if (raw.empty()) return "";
+    std::string text = raw;
+
+    // Fix PopCap designer typo in Anims.xml: nuke="yes"/ rare="yes">
+    size_t typo = text.find("nuke=\"yes\"/ rare=\"yes\">");
+    if (typo != std::string::npos) {
+        text.replace(typo, 23, "nuke=\"yes\" rare=\"yes\"/>");
+    }
+
+    // Strip <?xml ... ?> if present so we can wrap in a single root element
+    size_t xmlDecl = text.find("<?xml");
+    if (xmlDecl != std::string::npos) {
+        size_t declEnd = text.find("?>", xmlDecl);
+        if (declEnd != std::string::npos) {
+            text.erase(xmlDecl, declEnd - xmlDecl + 2);
+        }
+    }
+
+    return "<Root>" + text + "</Root>";
+}
+
 bool XmlLoader::LoadCrafts(const std::string& path, std::unordered_map<std::string, CraftDef>& outCrafts) {
-    std::string fullPath = Vfs::Resolve(path);
-    XMLDocument doc;
-    if (doc.LoadFile(fullPath.c_str()) != XML_SUCCESS) {
-        std::cerr << "[XmlLoader] Failed to load craft file: " << fullPath << std::endl;
+    std::string raw = Vfs::ReadTextFile(path);
+    if (raw.empty()) {
+        std::cerr << "[XmlLoader] Failed to read craft file: " << path << std::endl;
         return false;
     }
 
+    std::string prepared = PrepareXml(raw);
+    XMLDocument doc;
+    if (doc.Parse(prepared.c_str()) != XML_SUCCESS) {
+        std::cerr << "[XmlLoader] Failed to parse craft XML: " << path << std::endl;
+        return false;
+    }
+
+    XMLElement* root = doc.FirstChildElement("Root");
+    if (!root) return false;
+
     outCrafts.clear();
-    for (XMLElement* elem = doc.FirstChildElement("Craft"); elem != nullptr; elem = elem->NextSiblingElement("Craft")) {
+    for (XMLElement* elem = root->FirstChildElement("Craft"); elem != nullptr; elem = elem->NextSiblingElement("Craft")) {
         CraftDef craft;
         const char* name = elem->Attribute("name");
         const char* desc = elem->Attribute("desc");
@@ -37,46 +70,77 @@ bool XmlLoader::LoadCrafts(const std::string& path, std::unordered_map<std::stri
 }
 
 bool XmlLoader::LoadLevels(const std::string& path, std::vector<LevelDef>& outLevels) {
-    std::string fullPath = Vfs::Resolve(path);
-    XMLDocument doc;
-    if (doc.LoadFile(fullPath.c_str()) != XML_SUCCESS) {
-        std::cerr << "[XmlLoader] Failed to load levels file: " << fullPath << std::endl;
+    std::string raw = Vfs::ReadTextFile(path);
+    if (raw.empty()) {
+        std::cerr << "[XmlLoader] Failed to read levels file: " << path << std::endl;
         return false;
     }
 
-    outLevels.clear();
-    for (XMLElement* elem = doc.FirstChildElement("Level"); elem != nullptr; elem = elem->NextSiblingElement("Level")) {
-        LevelDef level;
-        const char* name = elem->Attribute("name");
-        if (name) level.name = name;
-        elem->QueryIntAttribute("length", &level.length);
+    std::string prepared = PrepareXml(raw);
+    XMLDocument doc;
+    if (doc.Parse(prepared.c_str()) != XML_SUCCESS) {
+        std::cerr << "[XmlLoader] Failed to parse levels XML: " << path << std::endl;
+        return false;
+    }
 
-        std::string lowerName = level.name;
+    XMLElement* root = doc.FirstChildElement("Root");
+    if (!root) return false;
+
+    std::vector<LevelDef> regions;
+    for (XMLElement* elem = root->FirstChildElement("Level"); elem != nullptr; elem = elem->NextSiblingElement("Level")) {
+        LevelDef reg;
+        const char* name = elem->Attribute("name");
+        if (name) reg.name = name;
+        elem->QueryIntAttribute("length", &reg.length);
+
+        std::string lowerName = reg.name;
         std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
-        level.bgTheme = lowerName;
+        reg.bgTheme = lowerName;
 
         for (XMLElement* intel = elem->FirstChildElement("Intel"); intel != nullptr; intel = intel->NextSiblingElement("Intel")) {
             const char* text = intel->Attribute("text");
             if (text) {
-                level.intelList.push_back({ text });
+                reg.intelList.push_back({ text });
             }
         }
-        outLevels.push_back(level);
+        regions.push_back(reg);
     }
-    std::cout << "[XmlLoader] Loaded " << outLevels.size() << " level definitions." << std::endl;
+
+    // Heavy Weapon campaign consists of 19 missions across these 10 regions:
+    // Missions 1-9: Frigistan to Killingrad (First campaign sweep)
+    // Missions 10-18: Frigistan to Killingrad (Second campaign sweep - increased enemy waves and Tier 2 bosses)
+    // Mission 19: Red Star HQ (Final fortress)
+    outLevels.clear();
+    for (int i = 0; i < NUM_CAMPAIGN_MISSIONS; ++i) {
+        int regIdx = (i < 9) ? i : (i < 18) ? (i - 9) : (int)regions.size() - 1;
+        if (regIdx < (int)regions.size()) {
+            LevelDef mission = regions[regIdx];
+            outLevels.push_back(mission);
+        }
+    }
+    std::cout << "[XmlLoader] Configured " << outLevels.size() << " campaign levels from " << regions.size() << " regions." << std::endl;
     return true;
 }
 
 bool XmlLoader::LoadWaves(const std::string& path, std::vector<LevelDef>& inOutLevels) {
-    std::string fullPath = Vfs::Resolve(path);
-    XMLDocument doc;
-    if (doc.LoadFile(fullPath.c_str()) != XML_SUCCESS) {
-        std::cerr << "[XmlLoader] Failed to load waves file: " << fullPath << std::endl;
+    std::string raw = Vfs::ReadTextFile(path);
+    if (raw.empty()) {
+        std::cerr << "[XmlLoader] Failed to read waves file: " << path << std::endl;
         return false;
     }
 
+    std::string prepared = PrepareXml(raw);
+    XMLDocument doc;
+    if (doc.Parse(prepared.c_str()) != XML_SUCCESS) {
+        std::cerr << "[XmlLoader] Failed to parse waves XML: " << path << std::endl;
+        return false;
+    }
+
+    XMLElement* root = doc.FirstChildElement("Root");
+    if (!root) return false;
+
     size_t levelIdx = 0;
-    for (XMLElement* lvlElem = doc.FirstChildElement("Level"); lvlElem != nullptr && levelIdx < inOutLevels.size();
+    for (XMLElement* lvlElem = root->FirstChildElement("Level"); lvlElem != nullptr && levelIdx < inOutLevels.size();
          lvlElem = lvlElem->NextSiblingElement("Level"), levelIdx++) {
         
         inOutLevels[levelIdx].waves.clear();
@@ -100,15 +164,24 @@ bool XmlLoader::LoadWaves(const std::string& path, std::vector<LevelDef>& inOutL
 }
 
 bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::string, BossDef>& outBosses) {
-    std::string fullPath = Vfs::Resolve(path);
-    XMLDocument doc;
-    if (doc.LoadFile(fullPath.c_str()) != XML_SUCCESS) {
-        std::cerr << "[XmlLoader] Failed to load bosses file: " << fullPath << std::endl;
+    std::string raw = Vfs::ReadTextFile(path);
+    if (raw.empty()) {
+        std::cerr << "[XmlLoader] Failed to read bosses file: " << path << std::endl;
         return false;
     }
 
+    std::string prepared = PrepareXml(raw);
+    XMLDocument doc;
+    if (doc.Parse(prepared.c_str()) != XML_SUCCESS) {
+        std::cerr << "[XmlLoader] Failed to parse bosses XML: " << path << std::endl;
+        return false;
+    }
+
+    XMLElement* root = doc.FirstChildElement("Root");
+    if (!root) return false;
+
     outBosses.clear();
-    for (XMLElement* bossElem = doc.FirstChildElement(); bossElem != nullptr; bossElem = bossElem->NextSiblingElement()) {
+    for (XMLElement* bossElem = root->FirstChildElement(); bossElem != nullptr; bossElem = bossElem->NextSiblingElement()) {
         BossDef boss;
         boss.type = bossElem->Name();
         const char* info = bossElem->Attribute("info");
@@ -162,15 +235,24 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
 }
 
 bool XmlLoader::LoadAnims(const std::string& path, std::vector<std::vector<AnimDef>>& outLevelAnims) {
-    std::string fullPath = Vfs::Resolve(path);
-    XMLDocument doc;
-    if (doc.LoadFile(fullPath.c_str()) != XML_SUCCESS) {
-        std::cerr << "[XmlLoader] Failed to load anims file: " << fullPath << std::endl;
+    std::string raw = Vfs::ReadTextFile(path);
+    if (raw.empty()) {
+        std::cerr << "[XmlLoader] Failed to read anims file: " << path << std::endl;
         return false;
     }
 
+    std::string prepared = PrepareXml(raw);
+    XMLDocument doc;
+    if (doc.Parse(prepared.c_str()) != XML_SUCCESS) {
+        std::cerr << "[XmlLoader] Failed to parse anims XML: " << path << std::endl;
+        return false;
+    }
+
+    XMLElement* root = doc.FirstChildElement("Root");
+    if (!root) return false;
+
     outLevelAnims.clear();
-    for (XMLElement* lvlElem = doc.FirstChildElement("Level"); lvlElem != nullptr; lvlElem = lvlElem->NextSiblingElement("Level")) {
+    for (XMLElement* lvlElem = root->FirstChildElement("Level"); lvlElem != nullptr; lvlElem = lvlElem->NextSiblingElement("Level")) {
         std::vector<AnimDef> anims;
         for (XMLElement* aElem = lvlElem->FirstChildElement("Anim"); aElem != nullptr; aElem = aElem->NextSiblingElement("Anim")) {
             AnimDef anim;

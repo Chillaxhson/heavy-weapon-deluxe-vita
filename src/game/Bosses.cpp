@@ -368,6 +368,7 @@ struct Rainer : Craft {
         meteors = st ? st->dishMeteors : 15;
         boss = true;
         persistent = true;
+        hittable = false;   // +0x48, set once the blimp has drifted in
         x = 520.0;
         y = 200.0;
         vx = -0.75;
@@ -388,6 +389,7 @@ struct Rainer : Craft {
         } else {
             entered = true;
         }
+        hittable = entered;
         x += vx;
         y += vy;
         propFrame += 0.5;
@@ -528,6 +530,7 @@ struct Wrecker : Craft {
         maxChain = (st && st->longChain) ? 0x170 : 0x160;
         boss = true;
         persistent = true;
+        hittable = false;   // +0x48, set once the truck has parked
         x = 0.0;
         y = 190.0;
         vx = vy = 0.0;
@@ -563,7 +566,7 @@ struct Wrecker : Craft {
             if (truckX < 20.0) {
                 truckV = truckX * -0.05;
                 if (truckX < 0.5) {
-                    entered = true;
+                    entered = hittable = true;
                     AudioSystem::SetLoop(SND_DIESEL, false);
                 }
             }
@@ -723,6 +726,7 @@ struct Ape : Craft {
         boss = true;
         persistent = true;
         mirror = true;          // facing left
+        hittable = false;       // +0x48, set once the scroll has stopped
         x = 380.0;
         y = 315.0;
         vx = vy = 0.0;
@@ -738,7 +742,7 @@ struct Ape : Craft {
             x -= b.ScrollSpeed() * 1.35;
             return;
         }
-        entered = true;
+        entered = hittable = true;
         x += vx;
         if (b.TankDead()) thrown = 3;
         if (wait == 0) {
@@ -814,6 +818,264 @@ struct Ape : Craft {
     }
 };
 
+// ---------------------------------------------------------------------------------
+// Eyebot (0x43ba90): a floating eye with six jointed arms. The eye can only be hit while
+// open; while closed, a hand charges up and calls down a lightning bolt.
+// ---------------------------------------------------------------------------------
+
+struct Eyebot;
+
+// Hand (0x43c000): rides on the tip of its arm; the boss draws it.
+struct EyeHand : BossPart {
+    Eyebot& eye;
+    int index;
+    EyeHand(Board& bd, Eyebot& owner, Craft& asCraft, int idx, double hp_, Texture* image)
+        : BossPart(bd, asCraft, image, hp_, 0.0, 0.0, 0), eye(owner), index(idx) {}
+    void Update() override;
+    void Draw() override {}
+    void Die() override;
+};
+
+struct Eyebot : Craft {
+    static constexpr int kArms = 6, kJoints = 8;
+    static constexpr int kBase[kArms][2] = { { -54, -54 }, { -76, 0 }, { -54, 54 }, { 54, -54 }, { 76, 0 }, { 54, 54 } };
+    Texture *body, *arm, *glow, *hand, *bolt, *handGlow;
+    double pt[kArms][kJoints][2];   // +0xc8 arm joints; the last one carries the hand
+    double reach[kArms][2];         // +0x3c8 where each hand is heading, relative to its base
+    double hv[kArms][2];            // +0x3d8 hand velocity
+    EyeHand* hands[kArms] = {};     // +0x3e8
+    double tx = 0.0, ty = 190.0;    // +0x88 +0x90 roaming target
+    int glowLevel = 0;              // +0x98
+    int fireTimer, fireDelay;       // +0x9c +0xa0
+    int charging = -1;              // +0xa8 hand charging a bolt
+    int handTimer, handDelay;       // +0xac +0xb0
+    int boltTimer = 0;              // +0xb4
+    double charge = 0.0;            // +0xb8
+    int handsLeft = kArms;          // +0xc0
+    int cycle = 499;                // +0xc4 eye open/closed phase
+    Eyebot(Board& bd) : Craft(bd, 0, "pupcopter") {
+        img = Grid("Images/eye/eye", 6);
+        body = Grid("Images/eye/body", 1);
+        arm = Grid("Images/eye/arm", 1);
+        glow = Grid("Images/eye/glow", 1);
+        hand = Grid("Images/eye/hand", 1);
+        bolt = Grid("Images/eye/bolt", 1);
+        handGlow = Grid("Images/eye/handglow", 1);
+        const BossLevelDef* st = Stats(b, "Eye");
+        hp = maxHp = st ? st->armor : 1500;
+        points = st ? st->score : 50000;
+        fireDelay = fireTimer = st ? st->fireInterval : 60;
+        handDelay = handTimer = st ? st->handFire : 20;
+        double handHp = st ? st->handArmor : 300;
+        boss = true;
+        persistent = true;
+        hittable = false;
+        x = 0.0;
+        y = -100.0;
+        for (int i = 0; i < kArms; ++i) {
+            int side = i / 3;
+            reach[i][0] = side * 192 - 96 + kBase[i][0];
+            reach[i][1] = kBase[i][1];
+            hv[i][0] = hv[i][1] = 0.0;
+            auto h = std::make_unique<EyeHand>(b, *this, *this, i, handHp, hand);
+            hands[i] = h.get();
+            b.AddPart(std::move(h));
+            for (int j = 0; j < kJoints; ++j) {
+                pt[i][j][0] = kBase[i][0] + j * (side * 24 - 12) + x;
+                pt[i][j][1] = kBase[i][1] + y;
+            }
+        }
+    }
+    static void Constrain(double* p, const double* to) {
+        double dx = p[0] - to[0], dy = p[1] - to[1];
+        double d = std::sqrt(dx * dx + dy * dy);
+        if ((int)d != 12 && d > 0.0) {
+            p[0] = dx * (12.0 / d) + to[0];
+            p[1] = dy * (12.0 / d) + to[1];
+        }
+    }
+    void UpdateF() override {}
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Update();
+        if (y > 160.0) ++cycle;
+        if ((cycle % 1000 < 500 || b.BossDying()) && handsLeft > 0) {
+            frame = std::max(frame - 0.2, 0.0);
+        } else {
+            frame = std::min(frame + 0.2, 5.0);
+        }
+        hittable = frame > 0.0;
+        glowLevel = hittable ? (int)((std::cos((b.App().tick % 63) * 0.1) + 1.0) * frame * 0.2 * 127.0) : 0;
+
+        if (b.App().tick % 50 == 0) {
+            tx = (double)(Rand() % 400) - 200.0;
+            ty = (double)(Rand() % 20) + 180.0;
+            for (int i = 0; i < kArms; ++i) {
+                reach[i][0] = ((double)(Rand() % 40) - 20.0) + kBase[i][0];
+                reach[i][1] = ((double)(Rand() % 40) - 20.0) + kBase[i][1];
+            }
+        }
+        if (x < tx && vx < 1.5) vx += 0.02;
+        if (tx < x && vx > -1.5) vx -= 0.02;
+        if (y < ty && vy < 0.5) vy += 0.01;
+        if (ty < y && vy > -0.5) vy -= 0.01;
+        x += vx;
+        y += vy;
+
+        // Arms: steer each hand toward its target, then pull the chain of joints after it
+        // and back to the shoulder (12px links).
+        for (int i = 0; i < kArms; ++i) {
+            double* tip = pt[i][kJoints - 1];
+            double gx = kBase[i][0] + reach[i][0] + x, gy = kBase[i][1] + reach[i][1] + y;
+            if (tip[0] < gx && hv[i][0] < 1.0) hv[i][0] += 0.01;
+            if (gx < tip[0] && hv[i][0] > -1.0) hv[i][0] -= 0.01;
+            if (tip[1] < gy && hv[i][1] < 1.0) hv[i][1] += 0.01;
+            if (gy < tip[1] && hv[i][1] > -1.0) hv[i][1] -= 0.01;
+            tip[0] += hv[i][0] + vx;
+            tip[1] += hv[i][1] + vy;
+            for (int j = kJoints - 2; j >= 0; --j) Constrain(pt[i][j], pt[i][j + 1]);
+        }
+        for (int i = 0; i < kArms; ++i) {
+            pt[i][0][0] = kBase[i][0] + x;
+            pt[i][0][1] = kBase[i][1] + y;
+            for (int j = 1; j < kJoints; ++j) Constrain(pt[i][j], pt[i][j - 1]);
+        }
+
+        // Energy cannon: fires from the fully open eye.
+        if (b.TankDead() || b.NukeFlash() != 0.0 || y < 160.0) fireTimer = fireDelay;
+        else if (fireTimer != 0) --fireTimer;
+        if (fireTimer == 0 && hittable) {
+            if (frame == 5.0 && !b.BossDying()) {
+                double a = (double)(Rand() % 157) * 0.01 + 3.926;
+                Board::Bullet s;
+                s.x = x;
+                s.y = y;
+                s.vx = std::cos(a) * -3.0;
+                s.vy = std::sin(a) * -3.0;
+                s.enemy = true;
+                s.img = TextureManager::Get("bombfrag");
+                b.Bullets().push_back(s);
+                fireTimer = fireDelay;
+                AudioSystem::PlaySoundId(SND_ENERGYFIRE, b.Pan(x));
+            }
+        } else if (!hittable) {
+            // Eye closed: pick a hand to charge a lightning bolt.
+            if (charging == -1 && y > 160.0) {
+                if (!b.TankDead() && b.NukeFlash() == 0.0) {
+                    if (handTimer != 0) --handTimer;
+                } else {
+                    handTimer = handDelay;
+                }
+                if (handTimer == 0 && !b.BossDying()) {
+                    int live[kArms], n = 0;
+                    for (int i = 0; i < kArms; ++i)
+                        if (hands[i] && hands[i]->y > 80.0) live[n++] = i;
+                    if (n != 0) {
+                        charging = live[Rand() % n];
+                        handTimer = handDelay;
+                        AudioSystem::PlaySoundId(SND_BOLTCHARGE, b.Pan(hands[charging]->x));
+                    }
+                }
+            }
+        }
+        if (charging >= 0) {
+            if (b.NukeFlash() == 0.0) {
+                if (charge < 255.0 && boltTimer == 0) {
+                    charge += 2.5;
+                    if (charge >= 255.0) {
+                        charge = 255.0;
+                        boltTimer = 50;
+                        AudioSystem::PlaySoundId(SND_THUNDER, b.Pan(hands[charging] ? hands[charging]->x : x));
+                    }
+                }
+            } else {
+                charging = -1;
+                boltTimer = 0;
+                charge = 0.0;
+            }
+        }
+        if (boltTimer > 0) {
+            EyeHand* h = charging >= 0 ? hands[charging] : nullptr;
+            if (h && !b.TankDead() && h->x < b.TankX() + 40.0 && b.TankX() - 40.0 < h->x) b.KillTank();
+            if (--boltTimer == 0) {
+                charge = 0.0;
+                charging = -1;
+            }
+        }
+    }
+    void HandLost(int i) {
+        if (charging == i) {
+            handTimer = handDelay;
+            charging = -1;
+            boltTimer = 0;
+            charge = 0.0;
+        }
+        hands[i] = nullptr;
+        --handsLeft;
+    }
+    void Draw() override {
+        if (b.Progress() < b.Length()) return;
+        for (int i = 0; i < kArms; ++i) {
+            for (int j = kJoints - 1; j >= 0; --j) Gfx::DrawSprite(arm, (int)pt[i][j][0], (int)pt[i][j][1], true);
+            EyeHand* h = hands[i];
+            if (!h) continue;
+            if (h->flash != 0) {
+                Gfx::SetColorizeImages(true);
+                Gfx::SetColor(255, 255 - h->flash, 255 - h->flash);
+            }
+            Gfx::DrawSprite(hand, (int)h->x, (int)h->y, true);
+            if (charge > 0.0 && charging == i) {
+                Gfx::SetDrawMode(1);
+                Gfx::SetColorizeImages(true);
+                Gfx::SetColor((int)charge, (int)charge, (int)charge);
+                Gfx::DrawSprite(handGlow, (int)h->x, (int)h->y, true);
+                Gfx::SetDrawMode(0);
+            }
+            Gfx::SetColorizeImages(false);
+        }
+        Gfx::DrawSprite(body, (int)x, (int)y, true);
+        if (hittable) {
+            Craft::Draw();
+            Gfx::SetDrawMode(1);
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(glowLevel, glowLevel, glowLevel);
+            Gfx::DrawSprite(glow, (int)x, (int)y, true);
+            Gfx::SetDrawMode(0);
+            Gfx::SetColorizeImages(false);
+        }
+        if (boltTimer != 0 && charging >= 0 && hands[charging]) {
+            EyeHand* h = hands[charging];
+            int c = (int)((b.App().tick % 10) * 25.5);
+            Gfx::SetDrawMode(1);
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(c, c, c);
+            Gfx::DrawSprite(bolt, (int)(h->x - 30.0), (int)(h->y - 22.0), false);
+            Gfx::FillRect(-320, 0, 640, 480);   // lightning flash
+            Gfx::SetColorizeImages(false);
+            Gfx::SetDrawMode(0);
+        }
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+    }
+};
+
+void EyeHand::Update() {
+    if (b.Progress() < b.Length()) return;
+    Craft::Update();
+    x = eye.pt[index][Eyebot::kJoints - 1][0];
+    y = eye.pt[index][Eyebot::kJoints - 1][1];
+    if (eye.hittable) hittable = true;
+}
+
+void EyeHand::Die() {
+    BossPart::Die();
+    eye.HandLost(index);
+}
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
@@ -824,6 +1086,7 @@ std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
         case 2: return std::make_unique<Rainer>(b);
         case 3: return std::make_unique<Wrecker>(b);
         case 4: return std::make_unique<Ape>(b);
+        case 5: return std::make_unique<Eyebot>(b);
         default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
     }
 }

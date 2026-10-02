@@ -231,6 +231,10 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
             }
             if (const char* lc = lvlElem->Attribute("longchain")) bLevel.longChain = std::string(lc) == "yes";
             lvlElem->QueryDoubleAttribute("throw", &bLevel.throwSpeed);
+            if (XMLElement* hElem = lvlElem->FirstChildElement("Hand")) {
+                hElem->QueryIntAttribute("armor", &bLevel.handArmor);
+                hElem->QueryIntAttribute("fire", &bLevel.handFire);
+            }
             if (XMLElement* jElem = lvlElem->FirstChildElement("Jump")) {
                 jElem->QueryDoubleAttribute("xspeed", &bLevel.jumpX);
                 jElem->QueryDoubleAttribute("yspeed", &bLevel.jumpY);

@@ -72,6 +72,8 @@ public:
     // Draw primitives
     static void DrawRect(float x, float y, float w, float h, const Color4f& color);
     static void DrawFillRect(float x, float y, float w, float h, const Color4f& color);
+    // Filled convex quad, corners in drawing order.
+    static void DrawFillQuad(const float xs[4], const float ys[4], const Color4f& color);
     static void DrawLine(float x1, float y1, float x2, float y2, const Color4f& color, float width = 1.0f);
 
     // Screen Shake effect

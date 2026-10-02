@@ -48,6 +48,8 @@ struct BossLevelDef {
     double speed = 3.0;                   // Head
     int chargeDelay = 500, bombOn = 30, bombOff = 30, bombFreq = 6;
     int boulders = 8;                     // Worm
+    int armArmor = 750;                   // Robot
+    double downAccel = 0.04, downMax = 3.0, upAccel = 0.2, upMax = 3.0;
     struct Jump { int depth = 1100; double jump = 4.0, gravity = 0.02, lateral = 1.0; } wormJump, wormJumpFast;
 };
 

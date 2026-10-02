@@ -29,6 +29,7 @@ void DrawSprite(const Texture* img, int x, int y, bool centered = false, int col
 void DrawImageRect(const Texture* img, int dx, int dy, int dw, int dh, int sx, int sy, int sw, int sh, bool mirror = false);
 
 void FillRect(int x, int y, int w, int h);
+void FillPolygon(const int xs[4], const int ys[4]);   // four-point polygon (0x4716c0)
 
 } // namespace Gfx
 } // namespace HeavyWeapon

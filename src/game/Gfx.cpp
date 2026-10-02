@@ -64,6 +64,15 @@ void DrawSprite(const Texture* img, int x, int y, bool centered, int col, int ro
     DrawImageRect(img, x, y, cw, ch, cw * col, ch * row, cw, ch, mirror);
 }
 
+void FillPolygon(const int xs[4], const int ys[4]) {
+    float fx[4], fy[4];
+    for (int i = 0; i < 4; ++i) {
+        fx[i] = (float)(xs[i] + sTransX);
+        fy[i] = (float)(ys[i] + sTransY);
+    }
+    Renderer::DrawFillQuad(fx, fy, sColor);
+}
+
 void FillRect(int x, int y, int w, int h) {
     Renderer::DrawFillRect((float)(x + sTransX), (float)(y + sTransY), (float)w, (float)h, sColor);
 }

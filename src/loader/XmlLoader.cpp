@@ -253,7 +253,12 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
                 hElem->QueryIntAttribute("armor", &bLevel.handArmor);
                 hElem->QueryIntAttribute("fire", &bLevel.handFire);
             }
+            if (XMLElement* aElem = lvlElem->FirstChildElement("Arm")) aElem->QueryIntAttribute("armor", &bLevel.armArmor);
             if (XMLElement* jElem = lvlElem->FirstChildElement("Jump")) {
+                jElem->QueryDoubleAttribute("downaccel", &bLevel.downAccel);
+                jElem->QueryDoubleAttribute("downmax", &bLevel.downMax);
+                jElem->QueryDoubleAttribute("upaccel", &bLevel.upAccel);
+                jElem->QueryDoubleAttribute("upmax", &bLevel.upMax);
                 jElem->QueryDoubleAttribute("xspeed", &bLevel.jumpX);
                 jElem->QueryDoubleAttribute("yspeed", &bLevel.jumpY);
                 jElem->QueryDoubleAttribute("gravity", &bLevel.jumpGravity);

@@ -356,6 +356,22 @@ void Renderer::DrawFillRect(float x, float y, float w, float h, const Color4f& c
     SetColor(sCurrentColor);
 }
 
+void Renderer::DrawFillQuad(const float xs[4], const float ys[4], const Color4f& color) {
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(color.r, color.g, color.b, color.a);
+
+    // Strip order 0,1,3,2 covers the polygon 0-1-2-3.
+    GLfloat vertices[] = { xs[0], ys[0], xs[1], ys[1], xs[3], ys[3], xs[2], ys[2] };
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glVertexPointer(2, GL_FLOAT, 0, vertices);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisableClientState(GL_VERTEX_ARRAY);
+
+    glEnable(GL_TEXTURE_2D);
+    SetColor(sCurrentColor);
+}
+
 void Renderer::DrawLine(float x1, float y1, float x2, float y2, const Color4f& color, float width) {
     glDisable(GL_TEXTURE_2D);
     glLineWidth(width);

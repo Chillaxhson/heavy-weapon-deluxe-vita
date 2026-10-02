@@ -1421,6 +1421,206 @@ void WormTurret::Die() {
     worm.TurretLost(index);
 }
 
+// ---------------------------------------------------------------------------------
+// X-Bot (0x443210): a giant robot that hops toward the tank and crushes it, with two
+// shoulder launchers and two armoured arms. Once both arms are gone its eye fires
+// twin laser beams.
+// ---------------------------------------------------------------------------------
+
+// Eye laser (0x4438f0): a tapered beam that streaks from the eye to the ground.
+struct EyeBeam : Hazard {
+    double tx, ty;          // +0x78 +0x80 tail
+    double angle;           // +0x98
+    bool landed = false;    // +0xa0
+    EyeBeam(Board& bd, double x_, double y_) : Hazard(bd, "rock", x_, y_, 0, 0, false), tx(x_), ty(y_) {
+        active = false;
+        angle = std::atan2(x_ - b.TankX(), (double)b.TankY() - y_) + 1.57;
+        vx = std::cos(angle) * 4.0;
+        vy = std::sin(angle) * 4.0;
+        AudioSystem::PlaySoundId(SND_ROBOTLASER, b.Pan(x));
+    }
+    void Update() override {
+        double len = std::sqrt((x - tx) * (x - tx) + (y - ty) * (y - ty));
+        bool tail = true;
+        if (y >= 460.0) {
+            landed = true;  // (the original also leaves a scorch mark here; not ported)
+        } else {
+            x += vx;
+            y += vy;
+            tail = len > 50.0;
+        }
+        if (tail) {
+            tx += vx;
+            ty += vy;
+        }
+        if (tx < -320.0 || tx > 320.0 || ty > 460.0) { Remove(); return; }
+        if (!b.TankDead() && b.HitsTank(img, (int)x, (int)y, 0, 0, false)) {
+            b.KillTank();
+            Remove();
+            return;
+        }
+        BaseUpdate();
+    }
+    void Draw() override {
+        Gfx::SetDrawMode(1);
+        double a = angle + 1.57, c = std::cos(a), sn = std::sin(a);
+        for (int w = 2; w > 0; --w) {
+            double hw = 4 * w + 1, tw = w + 1;
+            int xs[4] = { (int)(x + hw * c), (int)(x - hw * c), (int)(tx - tw * c), (int)(tx + tw * c) };
+            int ys[4] = { (int)(y + hw * sn), (int)(y - hw * sn), (int)(ty - tw * sn), (int)(ty + tw * sn) };
+            if (w == 2) Gfx::SetColor(0x80, 0x20, 0x40);
+            else Gfx::SetColor(255, 255, 255);
+            Gfx::FillPolygon(xs, ys);
+        }
+        Gfx::SetDrawMode(0);
+    }
+};
+
+struct Robot;
+
+// Arm (0x443720) or shoulder launcher (0x443d00); both ride at fixed offsets.
+struct RobotPart : BossPart {
+    Robot& robot;
+    int index;
+    bool launcher;
+    RobotPart(Board& bd, Robot& owner, Craft& asCraft, int idx, bool isLauncher, double hp_, Texture* image, int fire)
+        : BossPart(bd, asCraft, image, hp_, idx == 0 ? (isLauncher ? -52.0 : -59.0) : (isLauncher ? 52.0 : 59.0),
+                   isLauncher ? -26.0 : 60.0, fire),
+          robot(owner), index(idx), launcher(isLauncher) {
+        frame = idx;
+        hittable = true;
+    }
+    void Update() override {
+        if (!Follow()) return;
+        hittable = true;
+        if (!launcher) return;
+        timer = b.TankDead() ? fireDelay : timer - 1;
+        if (x > -300.0 && x < 300.0 && timer < 1 && b.NukeFlash() == 0.0) {
+            FireMissile(b, (int)x, (int)y, vx, vy);
+            timer = fireDelay;
+        }
+    }
+    void Die() override;
+};
+
+struct Robot : Craft {
+    Texture *waist, *foot, *panel, *eyeGlow;
+    RobotPart* arms[2] = {};        // +0x88
+    double footY = 0.0, prevFoot = 0.0;    // +0x98 +0xa0
+    double panelFrame = 0.0;        // +0xa8
+    int eyeTimer, eyeDelay;         // +0xb0 +0xb4
+    double downAccel, downMax, upAccel, upMax;
+    int shake = 0;                  // +0xf0
+    Robot(Board& bd) : Craft(bd, 0, "pupcopter") {
+        img = Grid("Images/robot/body", 1);
+        waist = Grid("Images/robot/waist", 1);
+        foot = Grid("Images/robot/foot", 1);
+        Texture* armImg = Grid("Images/robot/arms", 2);
+        Texture* launcherImg = Grid("Images/robot/launchers", 2);
+        panel = Grid("Images/robot/panel", 4);
+        eyeGlow = Grid("Images/robot/eyeglow", 1);
+        const BossLevelDef* st = Stats(b, "Robot");
+        hp = maxHp = st ? st->armor : 2200;
+        points = st ? st->score : 70000;
+        eyeDelay = eyeTimer = st ? st->fireInterval : 300;
+        downAccel = st ? st->downAccel : 0.04;
+        downMax = st ? st->downMax : 3.0;
+        upAccel = st ? st->upAccel : 0.2;
+        upMax = st ? st->upMax : 3.0;
+        int armHp = st ? st->armArmor : 750;
+        int lHp = (st && !st->launchers.empty()) ? st->launchers[0].armor : 700;
+        int lFire = (st && !st->launchers.empty()) ? st->launchers[0].fireInterval : 200;
+        boss = true;
+        persistent = true;
+        hittable = true;
+        x = 0.0;
+        y = -240.0;
+        vx = vy = 0.0;
+        for (int i = 0; i < 2; ++i) {
+            auto a = std::make_unique<RobotPart>(b, *this, *this, i, false, armHp, armImg, 0);
+            arms[i] = a.get();
+            b.AddPart(std::move(a));
+        }
+        for (int i = 0; i < 2; ++i) b.AddPart(std::make_unique<RobotPart>(b, *this, *this, i, true, lHp, launcherImg, lFire));
+    }
+    bool Armless() const { return !arms[0] && !arms[1]; }
+    void UpdateF() override {}
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Update();
+        panelFrame += 0.1;
+        if (panelFrame >= 4.0) panelFrame -= 4.0;
+        if (y >= 210.0) {
+            if (!b.BossDying()) vy = std::max(vy - upAccel, -upMax);   // spring up
+        } else {
+            vy = std::min(vy + downAccel, downMax);                    // fall
+        }
+        // The foot stays planted until the body lifts it; landing shakes the ground.
+        footY = std::max(footY, y + 208.0);
+        if (footY >= 410.0) footY = 410.0;
+        if (footY == 410.0 && prevFoot < 410.0) {
+            AudioSystem::PlaySoundId(SND_ROBOTSMASH, b.Pan(x));
+            shake = 0x80;
+        }
+        footY = std::min(footY, y + 208.0);
+        if (prevFoot == 410.0 && footY < 410.0) {
+            // Lift-off: hop toward the tank.
+            double target;
+            if (b.TankDead() || b.TankX() < -300.0) target = 240.0;
+            else target = std::clamp(b.TankX(), -240.0, 240.0);
+            vx = std::clamp((target - x) * 0.02 * ((double)(Rand() % 1000) * 0.0005 + 0.5), -1.5, 1.5);
+        }
+        prevFoot = footY;
+        if (!b.BossDying() && !b.TankDead() && b.HitsTank(foot, (int)x, (int)footY, 0, 0, false)) b.KillTank();
+        if (footY < 410.0) x += vx;
+        if (y < 260.0) y += vy;
+
+        if (!b.TankDead() && Armless()) --eyeTimer;
+        else eyeTimer = eyeDelay;
+        if (x > -300.0 && x < 300.0 && eyeTimer < 1 && b.NukeFlash() == 0.0 && !b.BossDying()) {
+            b.AddHazard(std::make_unique<EyeBeam>(b, x - 10.0, y - 55.0));
+            b.AddHazard(std::make_unique<EyeBeam>(b, x + 10.0, y - 55.0));
+            eyeTimer = eyeDelay;
+        }
+        if (shake != 0) {
+            b.Shake(shake);
+            shake -= 2;
+        }
+    }
+    void ArmLost(int i) { arms[i] = nullptr; }
+    void Draw() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Draw();
+        Gfx::DrawSprite(panel, (int)x, (int)(y + 37.0), true, (int)panelFrame);
+        if (flash != 0) {
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(255, 255 - flash, 255 - flash);
+        }
+        Gfx::DrawSprite(waist, (int)x, (int)(y + 126.0), true);
+        Gfx::DrawSprite(foot, (int)x, (int)footY, true);
+        if (eyeTimer > 0 && Armless()) {
+            int g = (int)(255.0 - (255.0 / eyeDelay) * eyeTimer);
+            Gfx::SetDrawMode(1);
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(g, g, g);
+            Gfx::DrawSprite(eyeGlow, (int)x, (int)(y - 55.0), true);
+            Gfx::SetDrawMode(0);
+        }
+        Gfx::SetColorizeImages(false);
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+    }
+};
+
+void RobotPart::Die() {
+    BossPart::Die();
+    if (!launcher) robot.ArmLost(index);
+}
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
@@ -1434,6 +1634,7 @@ std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
         case 5: return std::make_unique<Eyebot>(b);
         case 6: return std::make_unique<Head>(b);
         case 7: return std::make_unique<Mechworm>(b);
+        case 8: return std::make_unique<Robot>(b);
         default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
     }
 }

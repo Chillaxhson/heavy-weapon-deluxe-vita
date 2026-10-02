@@ -65,7 +65,7 @@ void PlayerTank::Update(float dt, const PlayerStats& stats, std::vector<Projecti
 
     // Aiming calculation
     // Priority 1: Touch screen direct aim
-    if (input.touchDown) {
+    if (input.touchDown || input.pointerAim) {
         float dx = input.touchX - x;
         float dy = (y - 12.0f) - input.touchY;
         if (dy > -10.0f) { // Aiming generally upward
@@ -680,9 +680,9 @@ void Enemy::Render() const {
 
         // Multi-part helicopter rotor rendering
         if (def.name == "SMALLCOPTER" || def.name == "BIGCOPTER") {
-            Texture* rotorTex = TextureManager::Get("copterblades");
+            Texture* rotorTex = TextureManager::Get("rotors");
             if (rotorTex) {
-                int rFrame = ((int)rotorAnim) % 10;
+                int rFrame = ((int)rotorAnim) % 7;
                 Renderer::DrawCel(rotorTex, rFrame, 0, x, y - 22.0f, true);
             }
         } else if (def.name == "MEDCOPTER") {

@@ -45,7 +45,7 @@ void WorldRenderer::SetTheme(const std::string& themeName, const std::vector<Ani
         anim.visible = true;
 
         // Preload animation texture strip
-        std::string animTexPath = "Images/Anims/" + def.name + ".png";
+        std::string animTexPath = "Images/Anims/" + def.name;
         TextureManager::Load(animTexPath);
 
         sAnims.push_back(anim);
@@ -67,7 +67,7 @@ void WorldRenderer::Update(float dt, float scrollSpeed) {
         }
 
         if (anim.def.type == "looping") {
-            anim.currentFrame += animSpeed * 60.0f * dt;
+            anim.currentFrame += animSpeed * POPCAP_TICKS_PER_SEC * dt;
             int maxFrames = anim.def.nuke ? anim.def.frames - 1 : anim.def.frames;
             if (maxFrames <= 0) maxFrames = 1;
             if (anim.currentFrame >= (float)maxFrames) {
@@ -76,7 +76,7 @@ void WorldRenderer::Update(float dt, float scrollSpeed) {
         }
 
         // Horizontal velocity
-        anim.worldX += anim.def.mx * 60.0f * dt;
+        anim.worldX += anim.def.mx * POPCAP_TICKS_PER_SEC * dt;
     }
 }
 
@@ -110,12 +110,12 @@ void WorldRenderer::RenderPlane(Texture* tex, float scrollFactor, float yOffset,
 }
 
 static void RenderPlaneAnims(int plane, std::vector<ActiveAnim>& anims, float scrollX) {
-    float scrollFactor = (plane == 4) ? 0.05f : (plane == 3) ? 0.25f : (plane == 2) ? 0.5f : 1.0f;
+    float scrollFactor = (plane == 4) ? 0.0f : (plane == 3) ? 0.25f : (plane == 2) ? 0.5f : 1.0f;
 
     for (auto& anim : anims) {
         if (anim.def.plane != plane || !anim.visible) continue;
 
-        std::string animTexPath = "Images/Anims/" + anim.def.name + ".png";
+        std::string animTexPath = "Images/Anims/" + anim.def.name;
         Texture* tex = TextureManager::Get(animTexPath);
         if (!tex) continue;
 
@@ -139,20 +139,24 @@ static void RenderPlaneAnims(int plane, std::vector<ActiveAnim>& anims, float sc
 }
 
 void WorldRenderer::Render() {
+    // Every plane is drawn at its native size. The sky is a full 640x480 frame and does
+    // not scroll; the 300px background planes sit bottom-aligned on the ground strip.
+    // Scroll factors are provisional until the original world update is decompiled.
+
     // Plane 4: Sky
-    RenderPlane(sSkyTex, 0.05f, 0.0f, (float)SCREEN_HEIGHT);
+    Renderer::DrawTexture(sSkyTex, 0.0f, 0.0f);
     RenderPlaneAnims(4, sAnims, sScrollX);
 
     // Plane 3: Far BG
-    RenderPlane(sBg2Tex, 0.25f, 140.0f, 320.0f);
+    RenderPlane(sBg2Tex, 0.25f, BG_PLANE_Y, 300.0f);
     RenderPlaneAnims(3, sAnims, sScrollX);
 
     // Plane 2: Mid BG
-    RenderPlane(sBgTex, 0.5f, 180.0f, 320.0f);
+    RenderPlane(sBgTex, 0.5f, BG_PLANE_Y, 300.0f);
     RenderPlaneAnims(2, sAnims, sScrollX);
 
     // Plane 1: Ground
-    RenderPlane(sGroundTex, 1.0f, GROUND_Y, 70.0f);
+    RenderPlane(sGroundTex, 1.0f, GROUND_PLANE_Y, 60.0f);
     RenderPlaneAnims(1, sAnims, sScrollX);
 }
 

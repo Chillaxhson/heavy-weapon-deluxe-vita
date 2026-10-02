@@ -20,37 +20,57 @@ std::string Vfs::NormalizeSlashes(const std::string& path) {
     return res;
 }
 
-// Case-insensitive path search for POSIX systems
-static std::string FindCaseInsensitive(const std::string& fullPath) {
-    if (access(fullPath.c_str(), F_OK) == 0) {
-        return fullPath;
-    }
-
-    size_t lastSlash = fullPath.find_last_of('/');
-    if (lastSlash == std::string::npos) return fullPath;
-
-    std::string dirPath = fullPath.substr(0, lastSlash);
-    std::string fileName = fullPath.substr(lastSlash + 1);
-
+// Case-insensitive lookup of a single directory entry.
+static bool FindEntryCaseInsensitive(const std::string& dirPath, const std::string& name, std::string& outName) {
     DIR* dir = opendir(dirPath.empty() ? "." : dirPath.c_str());
-    if (!dir) return fullPath;
+    if (!dir) return false;
 
-    std::string lowerTarget = fileName;
+    std::string lowerTarget = name;
     std::transform(lowerTarget.begin(), lowerTarget.end(), lowerTarget.begin(), ::tolower);
 
+    bool found = false;
     struct dirent* entry;
-    std::string match = "";
     while ((entry = readdir(dir)) != nullptr) {
-        std::string entryName = entry->d_name;
-        std::string lowerEntry = entryName;
+        std::string lowerEntry = entry->d_name;
         std::transform(lowerEntry.begin(), lowerEntry.end(), lowerEntry.begin(), ::tolower);
         if (lowerEntry == lowerTarget) {
-            match = dirPath + "/" + entryName;
+            outName = entry->d_name;
+            found = true;
             break;
         }
     }
     closedir(dir);
-    return match.empty() ? fullPath : match;
+    return found;
+}
+
+// Case-insensitive path search for POSIX systems. PopCap data references paths with
+// arbitrary casing (e.g. "frigistan\yetti" for Images/Anims/Frigistan/yetti.png), so every
+// component after the search root is matched case-insensitively.
+static std::string FindCaseInsensitive(const std::string& root, const std::string& relative) {
+    std::string direct = root + relative;
+    if (access(direct.c_str(), F_OK) == 0) {
+        return direct;
+    }
+
+    std::string current = root;
+    size_t start = 0;
+    while (start <= relative.size()) {
+        size_t slash = relative.find('/', start);
+        std::string part = relative.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        if (!part.empty()) {
+            std::string match;
+            std::string dirPath = current.empty() ? "." : current;
+            if (!dirPath.empty() && dirPath.back() == '/' && dirPath.size() > 1) dirPath.pop_back();
+            if (!FindEntryCaseInsensitive(dirPath, part, match)) {
+                return direct;
+            }
+            current += match;
+            if (slash != std::string::npos) current += "/";
+        }
+        if (slash == std::string::npos) break;
+        start = slash + 1;
+    }
+    return current;
 }
 
 void Vfs::Init(const std::string& customBasePath) {
@@ -73,13 +93,12 @@ std::string Vfs::Resolve(const std::string& relativePath) {
     }
 
     for (const auto& base : sSearchPaths) {
-        std::string combined = base;
-        if (!combined.empty() && combined.back() != '/') {
-            combined += "/";
+        std::string root = base;
+        if (!root.empty() && root.back() != '/' && root.back() != ':') {
+            root += "/";
         }
-        combined += clean;
 
-        std::string resolved = FindCaseInsensitive(combined);
+        std::string resolved = FindCaseInsensitive(root, clean);
         if (access(resolved.c_str(), F_OK) == 0) {
             return resolved;
         }

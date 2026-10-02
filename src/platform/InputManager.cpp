@@ -1,5 +1,6 @@
 #include "InputManager.h"
 #include "Constants.h"
+#include "Renderer.h"
 #include <cmath>
 #include <algorithm>
 
@@ -19,6 +20,7 @@ bool InputManager::sPrevLeft = false;
 bool InputManager::sPrevRight = false;
 bool InputManager::sPrevAltFire = false;
 bool InputManager::sPrevTouch = false;
+bool InputManager::sMouseRightPulse = false;
 
 void InputManager::Init() {
     SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
@@ -55,22 +57,42 @@ void InputManager::Update() {
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_CONTROLLERDEVICEADDED && !sController) {
+        if (event.type == SDL_QUIT) {
+            sState.quitRequested = true;
+        } else if (event.type == SDL_CONTROLLERDEVICEADDED && !sController) {
             sController = SDL_GameControllerOpen(event.cdevice.which);
         } else if (event.type == SDL_CONTROLLERDEVICEREMOVED && sController) {
             SDL_GameControllerClose(sController);
             sController = nullptr;
-        } else if (event.type == SDL_FINGERDOWN) {
-            sState.touchDown = true;
-            sState.touchX = event.tfinger.x * SCREEN_WIDTH;
-            sState.touchY = event.tfinger.y * SCREEN_HEIGHT;
-            sState.touchPressed = true;
-        } else if (event.type == SDL_FINGERMOTION) {
-            sState.touchX = event.tfinger.x * SCREEN_WIDTH;
-            sState.touchY = event.tfinger.y * SCREEN_HEIGHT;
+        } else if (event.type == SDL_FINGERDOWN || event.type == SDL_FINGERMOTION) {
+            // Finger coordinates are normalised over the touch panel, which covers the display.
+            Renderer::DisplayToLogical(event.tfinger.x * DISPLAY_WIDTH, event.tfinger.y * DISPLAY_HEIGHT,
+                                       sState.touchX, sState.touchY);
+            if (event.type == SDL_FINGERDOWN) {
+                sState.touchDown = true;
+                sState.touchPressed = true;
+            }
         } else if (event.type == SDL_FINGERUP) {
             sState.touchDown = false;
             sState.touchReleased = true;
+#ifndef __vita__
+        } else if (event.type == SDL_MOUSEMOTION && event.motion.which != SDL_TOUCH_MOUSEID) {
+            Renderer::WindowToLogical((float)event.motion.x, (float)event.motion.y, sState.touchX, sState.touchY);
+            sState.pointerAim = true;
+        } else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID) {
+            Renderer::WindowToLogical((float)event.button.x, (float)event.button.y, sState.touchX, sState.touchY);
+            sState.pointerAim = true;
+            if (event.button.button == SDL_BUTTON_LEFT) {
+                sState.touchDown = true;
+                sState.touchPressed = true;
+            } else if (event.button.button == SDL_BUTTON_RIGHT) {
+                sMouseRightPulse = true;
+            }
+        } else if (event.type == SDL_MOUSEBUTTONUP && event.button.which != SDL_TOUCH_MOUSEID &&
+                   event.button.button == SDL_BUTTON_LEFT) {
+            sState.touchDown = false;
+            sState.touchReleased = true;
+#endif
         }
     }
 
@@ -150,6 +172,28 @@ void InputManager::Update() {
         btnConfirm = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_A);
         btnCancel = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_B);
     }
+
+#ifndef __vita__
+    // Desktop keyboard + mouse. Mouse aims (hover) and the left button fires, as on PC.
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    bool kLeft = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A];
+    bool kRight = keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D];
+    if (kLeft != kRight) moveX = kLeft ? -1.0f : 1.0f;
+    btnLeft |= kLeft;
+    btnRight |= kRight;
+    btnUp |= keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W];
+    btnDown |= keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S];
+    btnCannon |= keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_J] || sState.touchDown;
+    btnNuke |= keys[SDL_SCANCODE_X] || keys[SDL_SCANCODE_N] || sMouseRightPulse;
+    btnLaser |= keys[SDL_SCANCODE_C] || keys[SDL_SCANCODE_M];
+    btnConfirm |= keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+    btnCancel |= keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
+    btnPause |= keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_P];
+    sMouseRightPulse = false;
+
+    // A gamepad or keyboard aim overrides the mouse until it moves again.
+    if (std::abs(aimX) > 0.0f || std::abs(aimY) > 0.0f) sState.pointerAim = false;
+#endif
 
     sState.moveAxisX = moveX;
     sState.aimAxisX = aimX;

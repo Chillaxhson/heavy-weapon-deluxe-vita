@@ -1,9 +1,44 @@
 #include "Renderer.h"
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <vector>
 
 namespace HeavyWeapon {
 
+#ifndef __vita__
+// Framebuffer objects are core since GL 3.0 but not part of the GL 1.x ABI that
+// libGL exports, so resolve them at runtime on desktop.
+static PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers_ = nullptr;
+static PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer_ = nullptr;
+static PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D_ = nullptr;
+static PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus_ = nullptr;
+static PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers_ = nullptr;
+#define glGenFramebuffers glGenFramebuffers_
+#define glBindFramebuffer glBindFramebuffer_
+#define glFramebufferTexture2D glFramebufferTexture2D_
+#define glCheckFramebufferStatus glCheckFramebufferStatus_
+#define glDeleteFramebuffers glDeleteFramebuffers_
+
+static bool LoadFramebufferFunctions() {
+    glGenFramebuffers_ = (PFNGLGENFRAMEBUFFERSPROC)SDL_GL_GetProcAddress("glGenFramebuffers");
+    glBindFramebuffer_ = (PFNGLBINDFRAMEBUFFERPROC)SDL_GL_GetProcAddress("glBindFramebuffer");
+    glFramebufferTexture2D_ = (PFNGLFRAMEBUFFERTEXTURE2DPROC)SDL_GL_GetProcAddress("glFramebufferTexture2D");
+    glCheckFramebufferStatus_ = (PFNGLCHECKFRAMEBUFFERSTATUSPROC)SDL_GL_GetProcAddress("glCheckFramebufferStatus");
+    glDeleteFramebuffers_ = (PFNGLDELETEFRAMEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteFramebuffers");
+    return glGenFramebuffers_ && glBindFramebuffer_ && glFramebufferTexture2D_ &&
+           glCheckFramebufferStatus_ && glDeleteFramebuffers_;
+}
+#endif
+
+SDL_Window* Renderer::sWindow = nullptr;
+ScaleMode Renderer::sScaleMode = SCALE_ASPECT;
+GLuint Renderer::sFbo = 0;
+GLuint Renderer::sFboTex = 0;
 Color4f Renderer::sCurrentColor = Color4f::White();
 bool Renderer::sIsAdditive = false;
 float Renderer::sShakeIntensity = 0.0f;
@@ -11,27 +46,85 @@ float Renderer::sShakeTimer = 0.0f;
 float Renderer::sShakeOffsetX = 0.0f;
 float Renderer::sShakeOffsetY = 0.0f;
 
-void Renderer::Init() {
-    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+static void GetDrawableSize(SDL_Window* window, int& w, int& h) {
+#ifdef __vita__
+    (void)window;
+    w = DISPLAY_WIDTH;
+    h = DISPLAY_HEIGHT;
+#else
+    SDL_GL_GetDrawableSize(window, &w, &h);
+#endif
+}
+
+// Destination rectangle of the game frame on a display of the given size.
+static Rect ComputePresentRect(ScaleMode mode, int dispW, int dispH) {
+    if (mode == SCALE_STRETCH) {
+        return { 0.0f, 0.0f, (float)dispW, (float)dispH };
+    }
+    float scale = std::min((float)dispW / SCREEN_WIDTH, (float)dispH / SCREEN_HEIGHT);
+    float w = std::round(SCREEN_WIDTH * scale);
+    float h = std::round(SCREEN_HEIGHT * scale);
+    return { std::floor((dispW - w) * 0.5f), std::floor((dispH - h) * 0.5f), w, h };
+}
+
+static void SetOrtho(float w, float h) {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrthof(0.0f, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT, 0.0f, -1.0f, 1.0f);
+    glOrthof(0.0f, w, h, 0.0f, -1.0f, 1.0f);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+}
+
+bool Renderer::Init(SDL_Window* window) {
+    sWindow = window;
+
+#ifndef __vita__
+    if (!LoadFramebufferFunctions()) {
+        std::cerr << "[Renderer] OpenGL framebuffer objects are unavailable" << std::endl;
+        return false;
+    }
+#endif
+
+    glGenTextures(1, &sFboTex);
+    glBindTexture(GL_TEXTURE_2D, sFboTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    glGenFramebuffers(1, &sFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, sFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sFboTex, 0);
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "[Renderer] Game render target incomplete: 0x" << std::hex << status << std::dec << std::endl;
+        return false;
+    }
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_TEXTURE_2D);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+    return true;
+}
+
+void Renderer::Shutdown() {
+    if (sFbo) glDeleteFramebuffers(1, &sFbo);
+    if (sFboTex) glDeleteTextures(1, &sFboTex);
+    sFbo = 0;
+    sFboTex = 0;
 }
 
 void Renderer::BeginFrame() {
-    glClearColor(0.05f, 0.06f, 0.08f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    glBindFramebuffer(GL_FRAMEBUFFER, sFbo);
+    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    SetOrtho((float)SCREEN_WIDTH, (float)SCREEN_HEIGHT);
 
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
 
     if (sShakeTimer > 0.0f) {
         glTranslatef(sShakeOffsetX, sShakeOffsetY, 0.0f);
@@ -42,7 +135,87 @@ void Renderer::BeginFrame() {
 }
 
 void Renderer::EndFrame() {
+    int dispW = 0, dispH = 0;
+    GetDrawableSize(sWindow, dispW, dispH);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, dispW, dispH);
+    SetOrtho((float)dispW, (float)dispH);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // The game target is a GL texture, so its first row is the bottom of the frame:
+    // sample it with V flipped.
+    Rect dst = ComputePresentRect(sScaleMode, dispW, dispH);
+    GLfloat vertices[] = {
+        dst.x,         dst.y,
+        dst.x + dst.w, dst.y,
+        dst.x,         dst.y + dst.h,
+        dst.x + dst.w, dst.y + dst.h
+    };
+    GLfloat texCoords[] = { 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+
+    SetAdditiveBlend(false);
+    glDisable(GL_BLEND);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBindTexture(GL_TEXTURE_2D, sFboTex);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    glVertexPointer(2, GL_FLOAT, 0, vertices);
+    glTexCoordPointer(2, GL_FLOAT, 0, texCoords);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glEnable(GL_BLEND);
+
+#ifdef __vita__
     vglSwapBuffers(GL_FALSE);
+#else
+    SDL_GL_SwapWindow(sWindow);
+#endif
+}
+
+void Renderer::DisplayToLogical(float dx, float dy, float& outX, float& outY) {
+    int dispW = 0, dispH = 0;
+    GetDrawableSize(sWindow, dispW, dispH);
+    Rect dst = ComputePresentRect(sScaleMode, dispW, dispH);
+    outX = (dx - dst.x) * SCREEN_WIDTH / dst.w;
+    outY = (dy - dst.y) * SCREEN_HEIGHT / dst.h;
+}
+
+void Renderer::WindowToLogical(float wx, float wy, float& outX, float& outY) {
+#ifdef __vita__
+    DisplayToLogical(wx, wy, outX, outY);
+#else
+    int winW = 1, winH = 1, dispW = 1, dispH = 1;
+    SDL_GetWindowSize(sWindow, &winW, &winH);
+    SDL_GL_GetDrawableSize(sWindow, &dispW, &dispH);
+    DisplayToLogical(wx * dispW / winW, wy * dispH / winH, outX, outY);
+#endif
+}
+
+bool Renderer::SaveScreenshot(const std::string& path) {
+#ifdef __vita__
+    (void)path;
+    return false;
+#else
+    std::vector<uint8_t> pixels(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
+    glBindFramebuffer(GL_FRAMEBUFFER, sFbo);
+    glReadPixels(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_PIXELFORMAT_RGBA32);
+    if (!surf) return false;
+    const int pitch = SCREEN_WIDTH * 4;
+    for (int y = 0; y < SCREEN_HEIGHT; ++y) {
+        uint8_t* row = static_cast<uint8_t*>(surf->pixels) + y * surf->pitch;
+        std::memcpy(row, pixels.data() + (SCREEN_HEIGHT - 1 - y) * pitch, pitch);
+        for (int x = 0; x < SCREEN_WIDTH; ++x) row[x * 4 + 3] = 255;
+    }
+    bool ok = IMG_SavePNG(surf, path.c_str()) == 0;
+    SDL_FreeSurface(surf);
+    return ok;
+#endif
 }
 
 void Renderer::SetAdditiveBlend(bool additive) {

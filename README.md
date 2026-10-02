@@ -3,14 +3,14 @@
 A native **PlayStation Vita** source port of PopCap Games' classic arcade side-scrolling shooter, **Heavy Weapon Deluxe**.
 
 ![PS Vita](https://img.shields.io/badge/Platform-PS%20Vita-blue.svg)
-![Target Resolution](https://img.shields.io/badge/Resolution-960x544%20(60FPS)-green.svg)
+![Target Resolution](https://img.shields.io/badge/Resolution-640x480%20scaled%20to%20960x544-green.svg)
 ![Controls](https://img.shields.io/badge/Controls-Twin--Stick-orange.svg)
 
 ---
 
 ## Features
 
-* **Native Vita Widescreen (960×544)**: The original PC game's 960-wide parallax background textures match the PS Vita's screen width pixel-for-pixel with locked 60 FPS.
+* **Original 640×480 presentation**: The game renders at its native 640×480 (every asset is authored for it) into an offscreen target that is scaled to the Vita display, pillarboxed at 4:3 (725×544) by default, or stretched to fill.
 * **Modern Twin-Stick Controls**:
   * **Left Analog Stick / D-Pad**: Move Atomic Tank left and right.
   * **Right Analog Stick**: 360° fluid turret aiming and direction-guided auto-fire.
@@ -58,21 +58,31 @@ This port follows the **Bring-Your-Own-Game (BYOG)** standard. You must provide 
 
 ## Building from Source
 
-The project includes containerized build support using the official `vitasdk/vitasdk` Docker/Podman image:
+Both builds run in containers, so the host only needs Podman. The helper script wraps them:
 
 ```bash
-# Clone the repository
 git clone git@github.com:Chillaxhson/heavy-weapon-deluxe-vita.git
 cd heavy-weapon-deluxe-vita
 
-# Build with Podman / Docker
-podman run --rm -v "$(pwd):/src:Z" -w /src docker.io/vitasdk/vitasdk:latest bash -c "
-    cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=/usr/local/vitasdk/share/vita.toolchain.cmake
-    cmake --build build
-"
+tools/desktop/hw.sh vpk      # PS Vita package -> build/HeavyWeaponDeluxe.vpk
 ```
 
-The compiled package will be located at `build/HeavyWeaponDeluxe.vpk`.
+### Desktop build (for development)
+
+The same code also builds for Linux (SDL2 + OpenGL), so changes can be checked without
+reinstalling a VPK. Copy your own game files to `Heavy Weapon Deluxe/` at the repo root first.
+
+```bash
+tools/desktop/hw.sh image    # once: build the dev container
+tools/desktop/hw.sh build    # compile into build-desktop/
+tools/desktop/hw.sh run      # play in a window (keyboard + mouse, sound)
+tools/desktop/hw.sh shot shots/play.png --state play --level 2 --frames 300   # headless screenshot
+```
+
+Game options: `--state title|map|play|armory`, `--level N` (0-based mission),
+`--frames N` (quit after N fixed-timestep frames), `--stretch`, `--scale N` (window size).
+Desktop controls: A/D or arrows to drive, mouse to aim, left click or Ctrl to fire,
+X or right click for a nuke, C for the megalaser, Enter to confirm, Esc to pause/back.
 
 ---
 

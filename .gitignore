@@ -36,3 +36,7 @@ Thumbs.db
 .idea/
 *.swp
 *~
+
+# Reverse-engineering workspace (contains extracted commercial binary)
+re/
+shots/

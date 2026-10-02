@@ -10,14 +10,25 @@
 #include <vector>
 #include <unordered_map>
 
+struct SDL_Window;
+
 namespace HeavyWeapon {
+
+// Command-line options, used mainly by the desktop build for testing.
+struct LaunchOptions {
+    std::string startState;      // "", "title", "map", "play", "armory"
+    int level = 0;               // mission index for map/play
+    int maxFrames = -1;          // > 0: run exactly this many fixed-timestep frames, then quit
+    std::string screenshotPath;  // saved after the final frame
+    bool stretch = false;
+};
 
 class GameEngine {
 public:
     GameEngine();
     ~GameEngine();
 
-    bool Init();
+    bool Init(SDL_Window* window, const LaunchOptions& opts);
     void Run();
     void Shutdown();
 
@@ -26,6 +37,8 @@ public:
 
 private:
     bool mRunning = true;
+    bool mInitialized = false;
+    LaunchOptions mOpts;
     GameState mState = STATE_TITLE;
 
     // Game data loaded from XML

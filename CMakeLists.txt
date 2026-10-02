@@ -4,12 +4,6 @@ project(HeavyWeaponDeluxe LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include("${VITASDK}/share/vita.cmake" REQUIRED)
-
-set(VITA_APP_NAME "Heavy Weapon Deluxe")
-set(VITA_TITLEID "HWDL00001")
-set(VITA_VERSION "01.00")
-
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
@@ -27,6 +21,35 @@ set(SOURCES
     src/core/Entities.cpp
     src/core/GameEngine.cpp
 )
+
+# ---------------------------------------------------------------------------
+# Desktop build (Linux): same game code on SDL2 + legacy OpenGL, for fast iteration
+# and screenshots. See tools/desktop/hw.sh.
+# ---------------------------------------------------------------------------
+if(NOT DEFINED ENV{VITASDK} AND NOT DEFINED VITASDK)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2 SDL2_image SDL2_mixer)
+    find_package(OpenGL REQUIRED)
+
+    add_executable(heavyweapon ${SOURCES} 3rdparty/tinyxml2/tinyxml2.cpp)
+    target_include_directories(heavyweapon PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/tinyxml2)
+    target_compile_definitions(heavyweapon PRIVATE GL_GLEXT_PROTOTYPES)
+    target_compile_options(heavyweapon PRIVATE -Wall -Wextra)
+    target_link_libraries(heavyweapon PRIVATE PkgConfig::SDL2 OpenGL::GL)
+    return()
+endif()
+
+# ---------------------------------------------------------------------------
+# PS Vita build
+# ---------------------------------------------------------------------------
+if(NOT DEFINED VITASDK)
+    set(VITASDK $ENV{VITASDK})
+endif()
+include("${VITASDK}/share/vita.cmake" REQUIRED)
+
+set(VITA_APP_NAME "Heavy Weapon Deluxe")
+set(VITA_TITLEID "HWDL00001")
+set(VITA_VERSION "01.00")
 
 add_executable(heavyweapon ${SOURCES})
 

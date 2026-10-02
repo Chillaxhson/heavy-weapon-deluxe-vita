@@ -30,7 +30,12 @@ struct InputState {
     bool confirmPressed = false;
     bool cancelPressed = false;
 
-    // Touch
+    // Window close / app exit requested
+    bool quitRequested = false;
+
+    // Touch, or the mouse on desktop. Coordinates are in logical 640x480 space.
+    // pointerAim is set while a mouse is aiming the turret (hover, like the PC game).
+    bool pointerAim = false;
     bool touchDown = false;
     bool touchPressed = false;
     bool touchReleased = false;
@@ -61,6 +66,7 @@ private:
     static bool sPrevRight;
     static bool sPrevAltFire;
     static bool sPrevTouch;
+    static bool sMouseRightPulse;
 };
 
 } // namespace HeavyWeapon

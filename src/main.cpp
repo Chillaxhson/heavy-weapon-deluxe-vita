@@ -1,14 +1,48 @@
 #include <SDL2/SDL.h>
-#include <vitaGL.h>
+#include "GLPlatform.h"
+#ifdef __vita__
 #include <psp2/power.h>
 #include <psp2/kernel/processmgr.h>
+#endif
 #include "Constants.h"
 #include "GameEngine.h"
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 
+static void PrintUsage() {
+    std::cout <<
+        "Usage: heavyweapon [options]\n"
+        "  --state <title|map|play|armory>  start on this screen\n"
+        "  --level <n>                      mission index (0-based) for map/play\n"
+        "  --frames <n>                     quit after n frames (fixed 60 Hz timestep)\n"
+        "  --screenshot <file.png>          save the final 640x480 frame (needs --frames)\n"
+        "  --stretch                        fill the window instead of keeping 4:3\n"
+        "  --scale <n>                      initial window size as a multiple of 640x480\n";
+}
+
+static bool ParseArgs(int argc, char* argv[], HeavyWeapon::LaunchOptions& opts, int& windowScale) {
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        bool hasValue = i + 1 < argc;
+        if (a == "--state" && hasValue) opts.startState = argv[++i];
+        else if (a == "--level" && hasValue) opts.level = std::atoi(argv[++i]);
+        else if (a == "--frames" && hasValue) opts.maxFrames = std::atoi(argv[++i]);
+        else if (a == "--screenshot" && hasValue) opts.screenshotPath = argv[++i];
+        else if (a == "--stretch") opts.stretch = true;
+        else if (a == "--scale" && hasValue) windowScale = std::max(1, std::atoi(argv[++i]));
+        else if (a == "--help" || a == "-h") { PrintUsage(); return false; }
+        else { std::cerr << "Unknown argument: " << a << "\n"; PrintUsage(); return false; }
+    }
+    return true;
+}
+
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    HeavyWeapon::LaunchOptions opts;
+    int windowScale = 2;
+    if (!ParseArgs(argc, argv, opts, windowScale)) {
+        return 1;
+    }
 
 #ifdef __vita__
     // Maximize PS Vita CPU and GPU clock frequencies for stable 60 FPS
@@ -18,22 +52,33 @@ int main(int argc, char* argv[]) {
     scePowerSetGpuXbarClockFrequency(166);
 #endif
 
-    // Initialize SDL2
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
         std::cerr << "Failed to initialize SDL2: " << SDL_GetError() << std::endl;
         return 1;
     }
+    // Audio is optional: the game still runs (silently) without it.
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+        std::cerr << "Audio unavailable: " << SDL_GetError() << std::endl;
+    }
 
-    // Configure VitaGL OpenGL context
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
 
+#ifdef __vita__
+    int winW = HeavyWeapon::DISPLAY_WIDTH;
+    int winH = HeavyWeapon::DISPLAY_HEIGHT;
+    Uint32 winFlags = SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL;
+#else
+    int winW = HeavyWeapon::SCREEN_WIDTH * windowScale;
+    int winH = HeavyWeapon::SCREEN_HEIGHT * windowScale;
+    Uint32 winFlags = SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
+
     SDL_Window* window = SDL_CreateWindow(
         "Heavy Weapon Deluxe",
-        SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        HeavyWeapon::SCREEN_WIDTH, HeavyWeapon::SCREEN_HEIGHT,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        winW, winH, winFlags
     );
 
     if (!window) {
@@ -52,16 +97,17 @@ int main(int argc, char* argv[]) {
 
     SDL_GL_SetSwapInterval(1); // VSync enabled
 
-    // Run game engine
+    int exitCode = 0;
     {
         HeavyWeapon::GameEngine engine;
-        if (engine.Init()) {
+        if (engine.Init(window, opts)) {
             engine.Run();
+        } else {
+            exitCode = 1;
         }
         engine.Shutdown();
     }
 
-    // Teardown
     SDL_GL_DeleteContext(glContext);
     SDL_DestroyWindow(window);
     SDL_Quit();
@@ -69,5 +115,5 @@ int main(int argc, char* argv[]) {
 #ifdef __vita__
     sceKernelExitProcess(0);
 #endif
-    return 0;
+    return exitCode;
 }

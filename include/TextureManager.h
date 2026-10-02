@@ -2,7 +2,7 @@
 
 #include <string>
 #include <unordered_map>
-#include <vitaGL.h>
+#include "GLPlatform.h"
 
 namespace HeavyWeapon {
 

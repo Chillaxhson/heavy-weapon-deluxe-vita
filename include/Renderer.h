@@ -2,7 +2,10 @@
 
 #include "Constants.h"
 #include "TextureManager.h"
-#include <vitaGL.h>
+#include "GLPlatform.h"
+#include <string>
+
+struct SDL_Window;
 
 namespace HeavyWeapon {
 
@@ -27,11 +30,30 @@ struct Color4f {
     static Color4f Black() { return { 0.0f, 0.0f, 0.0f, 1.0f }; }
 };
 
+// How the 640x480 game frame is fitted onto the display.
+enum ScaleMode {
+    SCALE_ASPECT = 0, // 4:3, pillarboxed (725x544 on Vita)
+    SCALE_STRETCH     // fill the whole display
+};
+
 class Renderer {
 public:
-    static void Init();
-    static void BeginFrame();
-    static void EndFrame();
+    static bool Init(SDL_Window* window);
+    static void Shutdown();
+    static void BeginFrame();   // binds the 640x480 game target
+    static void EndFrame();     // scales the game target to the display and presents
+
+    static void SetScaleMode(ScaleMode mode) { sScaleMode = mode; }
+    static ScaleMode GetScaleMode() { return sScaleMode; }
+
+    // Converts a point in physical display pixels to logical 640x480 game space.
+    static void DisplayToLogical(float dx, float dy, float& outX, float& outY);
+    // Same, for SDL window coordinates (mouse events), which differ from display
+    // pixels on HiDPI desktops.
+    static void WindowToLogical(float wx, float wy, float& outX, float& outY);
+
+    // Writes the most recent game frame (640x480) to a PNG. Desktop only.
+    static bool SaveScreenshot(const std::string& path);
 
     static void SetAdditiveBlend(bool additive);
     static void SetColor(const Color4f& color);
@@ -57,6 +79,10 @@ public:
     static void UpdateScreenShake(float dt);
 
 private:
+    static SDL_Window* sWindow;
+    static ScaleMode sScaleMode;
+    static GLuint sFbo;
+    static GLuint sFboTex;
     static Color4f sCurrentColor;
     static bool sIsAdditive;
     static float sShakeIntensity;

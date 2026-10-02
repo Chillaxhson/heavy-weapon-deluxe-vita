@@ -4,6 +4,8 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#include <sstream>
+#include <SDL2/SDL.h>
 
 namespace HeavyWeapon {
 
@@ -13,10 +15,15 @@ GameEngine::~GameEngine() {
     Shutdown();
 }
 
-bool GameEngine::Init() {
+bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
+    mOpts = opts;
     Vfs::Init();
     TextureManager::Init();
-    Renderer::Init();
+    if (!Renderer::Init(window)) {
+        return false;
+    }
+    Renderer::SetScaleMode(opts.stretch ? SCALE_STRETCH : SCALE_ASPECT);
+    mInitialized = true;
     FontRenderer::Init();
     AudioSystem::Init();
     InputManager::Init();
@@ -41,29 +48,56 @@ bool GameEngine::Init() {
         AudioSystem::PreloadSound(sfx);
     }
 
-    // Play title music
-    AudioSystem::PlayMusic("Music/LoveTheme.ogg");
-
     mState = STATE_TITLE;
+    mCurrentLevelIndex = std::clamp(opts.level, 0, std::max(0, (int)mLevels.size() - 1));
+    if (opts.startState == "map") {
+        mState = STATE_MISSION_SELECT;
+    } else if (opts.startState == "play") {
+        StartLevel(mCurrentLevelIndex);
+    } else if (opts.startState == "armory") {
+        mStats.availableUpgradePoints = 3;
+        mState = STATE_ARMORY;
+    }
+
+    if (mState != STATE_PLAYING) {
+        AudioSystem::PlayMusic("Music/LoveTheme.ogg");
+    }
     return true;
 }
 
 void GameEngine::Shutdown() {
+    if (!mInitialized) return;
+    mInitialized = false;
     AudioSystem::Shutdown();
     InputManager::Shutdown();
     TextureManager::Shutdown();
+    Renderer::Shutdown();
 }
 
 void GameEngine::Run() {
+    // With --frames the timestep is fixed so captured frames are reproducible.
+    const bool fixedRun = mOpts.maxFrames > 0;
+    int frame = 0;
     uint32_t lastTicks = SDL_GetTicks();
     while (mRunning) {
         uint32_t currentTicks = SDL_GetTicks();
         float dt = (float)(currentTicks - lastTicks) / 1000.0f;
         if (dt > 0.05f) dt = 0.05f; // Cap at 20fps minimum
         lastTicks = currentTicks;
+        if (fixedRun) dt = FIXED_DT;
 
         Update(dt);
         Render();
+
+        if (InputManager::GetState().quitRequested) mRunning = false;
+        if (fixedRun && ++frame >= mOpts.maxFrames) {
+            if (!mOpts.screenshotPath.empty()) {
+                bool ok = Renderer::SaveScreenshot(mOpts.screenshotPath);
+                std::cout << (ok ? "[GameEngine] Saved screenshot " : "[GameEngine] Failed to save screenshot ")
+                          << mOpts.screenshotPath << std::endl;
+            }
+            mRunning = false;
+        }
     }
 }
 
@@ -93,36 +127,82 @@ void GameEngine::Update(float dt) {
     }
 }
 
+// Main menu buttons are baked into mainmenu.jpg; these are their centres (measured from
+// the art). The highlight sprites mainbigbtn (110x110) / mainsmallbtn (120x40) are
+// additive rim glows centred on the selected button.
+struct MenuButton {
+    float cx, cy;
+    bool big;
+};
+static const MenuButton kMenuButtons[] = {
+    {  99.5f, 250.0f, true  }, // MISSION
+    { 229.5f, 380.0f, true  }, // SURVIVAL
+    { 534.5f, 215.0f, false }, // HEROES
+    { 505.0f, 285.0f, false }, // OPTIONS
+    { 504.5f, 354.5f, false }, // HELP
+    { 534.0f, 425.0f, false }, // QUIT
+};
+enum { MENU_MISSION = 0, MENU_SURVIVAL, MENU_HEROES, MENU_OPTIONS, MENU_HELP, MENU_QUIT, MENU_COUNT };
+
+static int HitTestMenu(float x, float y) {
+    for (int i = 0; i < MENU_COUNT; ++i) {
+        const MenuButton& b = kMenuButtons[i];
+        float hw = b.big ? 50.0f : 55.0f;
+        float hh = b.big ? 50.0f : 16.0f;
+        if (std::abs(x - b.cx) <= hw && std::abs(y - b.cy) <= hh) return i;
+    }
+    return -1;
+}
+
 void GameEngine::UpdateTitle(float dt) {
     (void)dt;
     const InputState& input = InputManager::GetState();
 
+    // Big buttons on the left, small ones in a column on the right.
+    int prevSel = mMenuSelection;
     if (input.upPressed) {
-        mMenuSelection = (mMenuSelection - 1 + 3) % 3;
-        AudioSystem::PlaySound("stats", 0.5f);
+        mMenuSelection = (mMenuSelection - 1 + MENU_COUNT) % MENU_COUNT;
     } else if (input.downPressed) {
-        mMenuSelection = (mMenuSelection + 1) % 3;
-        AudioSystem::PlaySound("stats", 0.5f);
+        mMenuSelection = (mMenuSelection + 1) % MENU_COUNT;
+    } else if (input.rightPressed && kMenuButtons[mMenuSelection].big) {
+        mMenuSelection = MENU_HEROES;
+    } else if (input.leftPressed && !kMenuButtons[mMenuSelection].big) {
+        mMenuSelection = MENU_MISSION;
     }
 
-    if (input.confirmPressed || input.pausePressed || input.touchPressed) {
-        AudioSystem::PlaySound("buttondown");
-        if (mMenuSelection == 0) {
-            // Mission Campaign
+    bool activate = input.confirmPressed;
+    if (input.pointerAim || input.touchPressed) {
+        int hit = HitTestMenu(input.touchX, input.touchY);
+        if (hit >= 0) {
+            mMenuSelection = hit;
+            activate |= input.touchPressed;
+        }
+    }
+    if (mMenuSelection != prevSel) {
+        AudioSystem::PlaySound("mapover", 0.5f);
+    }
+
+    if (!activate) return;
+
+    AudioSystem::PlaySound("buttondown");
+    switch (mMenuSelection) {
+        case MENU_MISSION:
             mCurrentLevelIndex = 0;
             mStats = PlayerStats();
             mState = STATE_MISSION_SELECT;
-        } else if (mMenuSelection == 1) {
-            // Survival Mode
+            break;
+        case MENU_SURVIVAL:
+            // Survival mode is not implemented yet; start mission 1 as a placeholder.
             mCurrentLevelIndex = 0;
             mStats = PlayerStats();
             StartLevel(0);
-        } else {
-            // Deploy directly
-            mCurrentLevelIndex = 0;
-            mStats = PlayerStats();
-            mState = STATE_MISSION_SELECT;
-        }
+            break;
+        case MENU_QUIT:
+            mRunning = false;
+            break;
+        default:
+            AudioSystem::PlaySound("denied", 0.5f); // Heroes / Options / Help not implemented yet
+            break;
     }
 }
 
@@ -130,7 +210,7 @@ void GameEngine::UpdateMissionSelect(float dt) {
     (void)dt;
     const InputState& input = InputManager::GetState();
 
-    if (input.confirmPressed || input.pausePressed || input.touchPressed) {
+    if (input.confirmPressed || input.touchPressed) {
         AudioSystem::PlaySound("buttondown");
         AudioSystem::PlaySound("v_atomictank");
         StartLevel(mCurrentLevelIndex);
@@ -535,90 +615,71 @@ void GameEngine::Render() {
 }
 
 void GameEngine::RenderTitle() {
-    Texture* titleTex = TextureManager::Get("mainmenu");
-    if (titleTex) {
-        // Center 640x480 title on 960x544 screen
-        float drawW = 725.0f;
-        float drawH = 544.0f;
-        float drawX = (SCREEN_WIDTH - drawW) * 0.5f;
-        Renderer::DrawTexture(titleTex, drawX, 0.0f, drawW, drawH);
-    }
+    Renderer::DrawTexture(TextureManager::Get("mainmenu"), 0.0f, 0.0f);
 
-    // Main Menu Buttons
-    const char* options[] = { "CAMPAIGN MISSION", "SURVIVAL MODE", "WAR ROOM INTEL" };
-    Texture* btnTex = TextureManager::Get("mainbigbtn");
+    // Hover state: mainglow is a full-screen "over" image of which only the area around
+    // the selected button is drawn (lighting its bezel), plus the button's own rim glow.
+    const MenuButton& sel = kMenuButtons[mMenuSelection];
     Texture* glowTex = TextureManager::Get("mainglow");
-
-    float startY = 160.0f;
-    for (int i = 0; i < 3; ++i) {
-        float btnY = startY + (float)i * 90.0f;
-        float btnX = SCREEN_WIDTH * 0.5f;
-
-        if (mMenuSelection == i && glowTex) {
-            Renderer::SetAdditiveBlend(true);
-            float pulse = 0.7f + 0.3f * std::sin(mMenuGlowAnim);
-            Renderer::SetColor({ 1.0f, 0.8f, 0.2f, pulse });
-            Renderer::DrawTexture(glowTex, (SCREEN_WIDTH - 725.0f) * 0.5f, 0.0f, 725.0f, 544.0f);
-            Renderer::SetColor(Color4f::White());
-            Renderer::SetAdditiveBlend(false);
-        }
-
-        if (btnTex) {
-            Renderer::DrawCel(btnTex, 0, 0, btnX, btnY, true, 1.2f, 0.7f);
-        }
-
-        Color4f textCol = (mMenuSelection == i) ? Color4f{ 1.0f, 0.9f, 0.1f, 1.0f } : Color4f{ 0.8f, 0.8f, 0.8f, 1.0f };
-        FontRenderer::DrawString("RubberStampLET20", options[i], btnX, btnY - 10.0f, textCol, 1.0f, ALIGN_CENTER);
-    }
-
-    FontRenderer::DrawString("Computer", "D-PAD: SELECT    CROSS: COMMENCE", SCREEN_WIDTH * 0.5f, 495.0f, { 0.2f, 1.0f, 0.4f, 1.0f }, 1.0f, ALIGN_CENTER);
-}
-
-void GameEngine::RenderMissionSelect() {
-    // Strategic War Room tactical map (map.jpg)
-    Texture* mapTex = TextureManager::Get("map");
-    if (mapTex) {
-        float drawW = 725.0f;
-        float drawH = 544.0f;
-        float drawX = (SCREEN_WIDTH - drawW) * 0.5f;
-        Renderer::DrawTexture(mapTex, drawX, 0.0f, drawW, drawH);
-    }
-
-    // Country overlay
-    std::string missionMapName = "mission" + std::to_string(std::clamp(mCurrentLevelIndex + 1, 1, 10));
-    Texture* missionTex = TextureManager::Get(missionMapName);
-    if (missionTex) {
+    if (glowTex) {
+        Rect area = sel.big ? Rect{ sel.cx - 85.0f, sel.cy - 85.0f, 170.0f, 170.0f }
+                            : Rect{ sel.cx - 95.0f, sel.cy - 35.0f, SCREEN_WIDTH - (sel.cx - 95.0f), 70.0f };
+        area.x = std::max(area.x, 0.0f);
+        area.y = std::max(area.y, 0.0f);
+        area.w = std::min(area.w, SCREEN_WIDTH - area.x);
+        area.h = std::min(area.h, SCREEN_HEIGHT - area.y);
         Renderer::SetAdditiveBlend(true);
-        float pulse = 0.6f + 0.4f * std::sin(mMenuGlowAnim * 1.5f);
-        Renderer::SetColor({ 1.0f, 0.2f, 0.2f, pulse });
-        Renderer::DrawTexture(missionTex, (SCREEN_WIDTH - 725.0f) * 0.5f, 0.0f, 725.0f, 544.0f);
+        Renderer::SetColor({ 1.0f, 1.0f, 1.0f, 0.75f + 0.25f * std::sin(mMenuGlowAnim) });
+        Renderer::DrawTexture(glowTex, area, area);
         Renderer::SetColor(Color4f::White());
         Renderer::SetAdditiveBlend(false);
     }
 
-    // Animated target indicator (mappointer.png)
-    Texture* pointerTex = TextureManager::Get("mappointer");
-    if (pointerTex) {
-        float ptrX = SCREEN_WIDTH * 0.5f + std::sin(mMenuGlowAnim) * 10.0f;
-        float ptrY = 220.0f;
-        Renderer::DrawCel(pointerTex, 0, 0, ptrX, ptrY, true, 2.5f, 2.5f);
+    Texture* hlTex = TextureManager::Get(sel.big ? "mainbigbtn" : "mainsmallbtn");
+    if (hlTex) {
+        Renderer::SetAdditiveBlend(true);
+        Renderer::DrawCel(hlTex, 0, 0, sel.cx, sel.cy, true);
+        Renderer::SetAdditiveBlend(false);
     }
+}
 
-    // Mission brief tactical overlay
-    Renderer::DrawFillRect(140.0f, 320.0f, 680.0f, 160.0f, { 0.04f, 0.06f, 0.09f, 0.90f });
-    Renderer::DrawRect(140.0f, 320.0f, 680.0f, 160.0f, { 0.2f, 0.6f, 0.9f, 0.8f });
+void GameEngine::RenderMissionSelect() {
+    Renderer::DrawTexture(TextureManager::Get("map"), 0.0f, 0.0f);
+
+    // Mission briefing panel. Provisional layout until the original war-room screen
+    // (missionN.png territory overlays, mappointer, maprect) is decompiled.
+    const float panelX = 40.0f, panelY = 330.0f, panelW = 560.0f, panelH = 120.0f;
+    Renderer::DrawFillRect(panelX, panelY, panelW, panelH, { 0.0f, 0.0f, 0.0f, 0.75f });
+    Renderer::DrawRect(panelX, panelY, panelW, panelH, { 0.85f, 0.85f, 0.85f, 0.9f });
 
     if (mCurrentLevelIndex < (int)mLevels.size()) {
         const LevelDef& level = mLevels[mCurrentLevelIndex];
         std::string title = "MISSION " + std::to_string(mCurrentLevelIndex + 1) + ": " + level.name;
-        FontRenderer::DrawString("RubberStampLET20", title, 160.0f, 335.0f, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, ALIGN_LEFT);
-
+        FontRenderer::DrawString("RubberStampLET20", title, panelX + 14.0f, panelY + 10.0f, { 1.0f, 0.85f, 0.2f, 1.0f });
         if (!level.intelList.empty()) {
-            FontRenderer::DrawString("Normal", level.intelList[0].text, 160.0f, 375.0f, { 0.9f, 0.9f, 0.9f, 1.0f }, 0.95f, ALIGN_LEFT);
+            // Greedy word wrap to the panel width.
+            std::istringstream words(level.intelList[0].text);
+            std::string word, line;
+            float lineY = panelY + 40.0f;
+            const float maxW = panelW - 28.0f;
+            const float lineH = FontRenderer::GetStringHeight("Normal");
+            while (words >> word && lineY < panelY + panelH - 44.0f) {
+                std::string candidate = line.empty() ? word : line + " " + word;
+                if (!line.empty() && FontRenderer::GetStringWidth("Normal", candidate) > maxW) {
+                    FontRenderer::DrawString("Normal", line, panelX + 14.0f, lineY, Color4f::White());
+                    lineY += lineH;
+                    line = word;
+                } else {
+                    line = candidate;
+                }
+            }
+            if (!line.empty() && lineY < panelY + panelH - 44.0f) {
+                FontRenderer::DrawString("Normal", line, panelX + 14.0f, lineY, Color4f::White());
+            }
         }
     }
-
-    FontRenderer::DrawString("Computer", "PRESS CROSS TO COMMENCE INVASION", SCREEN_WIDTH * 0.5f, 500.0f, { 0.2f, 1.0f, 0.3f, 1.0f }, 1.0f, ALIGN_CENTER);
+    FontRenderer::DrawString("Normal", "PRESS CROSS TO BEGIN", SCREEN_WIDTH * 0.5f, panelY + panelH - 24.0f,
+                             { 0.6f, 1.0f, 0.6f, 1.0f }, 1.0f, ALIGN_CENTER);
 }
 
 void GameEngine::RenderPlaying() {
@@ -688,121 +749,83 @@ void GameEngine::RenderPlaying() {
 }
 
 void GameEngine::RenderHUD() {
-    // Metallic bottom status bar (statusbar.png, 640x30 stretched across 960 width)
-    Texture* barTex = TextureManager::Get("statusbar");
-    float barY = SCREEN_HEIGHT - 32.0f;
-    if (barTex) {
-        Renderer::DrawTexture(barTex, 0.0f, barY, (float)SCREEN_WIDTH, 32.0f);
-    }
+    // Status bar along the top of the screen. The contents of each slot are provisional
+    // until the original HUD draw code is decompiled.
+    Renderer::DrawTexture(TextureManager::Get("statusbar"), 0.0f, STATUSBAR_Y);
 
-    // Sliding mile marker (milemarker.png, 65x101) tracking stage progress
-    Texture* markerTex = TextureManager::Get("milemarker");
-    if (markerTex) {
-        float progressFrac = std::clamp(mLevelProgress / mLevelLength, 0.0f, 1.0f);
-        float markerStartX = 240.0f;
-        float markerEndX = 720.0f;
-        float markerX = markerStartX + progressFrac * (markerEndX - markerStartX);
-        Renderer::DrawCel(markerTex, 0, 0, markerX, barY - 20.0f, true, 0.65f, 0.65f);
-    }
-
-    // Score on top left
-    std::string scoreStr = "SCORE: " + std::to_string(mStats.score);
-    FontRenderer::DrawString("Normal", scoreStr, 24.0f, 16.0f, { 1.0f, 1.0f, 1.0f, 1.0f }, 1.0f);
-
-    // Lives icons (tankicon.png)
     Texture* tankIcon = TextureManager::Get("tankicon");
-    for (int i = 0; i < mStats.lives; ++i) {
-        if (tankIcon) {
-            Renderer::DrawCel(tankIcon, 0, 0, 24.0f + (float)i * 26.0f, 44.0f, false);
-        }
+    for (int i = 0; i < mStats.lives && tankIcon; ++i) {
+        Renderer::DrawTexture(tankIcon, 8.0f + (float)i * 21.0f, STATUSBAR_Y + 7.0f);
     }
 
-    // Nukes icons (nukeicon.png)
     Texture* nukeIcon = TextureManager::Get("nukeicon");
-    for (int i = 0; i < mStats.nukes; ++i) {
-        if (nukeIcon) {
-            Renderer::DrawCel(nukeIcon, 0, 0, SCREEN_WIDTH - 40.0f - (float)i * 32.0f, 14.0f, false);
-        }
+    for (int i = 0; i < mStats.nukes && nukeIcon; ++i) {
+        Renderer::DrawCel(nukeIcon, 0, 0, 125.0f + (float)i * 16.0f, STATUSBAR_Y + 15.0f, true, 0.6f, 0.6f);
     }
 
-    // Megameter bar (megameter.png)
+    FontRenderer::DrawString("Normal", std::to_string(mStats.score), 330.0f, STATUSBAR_Y + 7.0f,
+                             Color4f::White(), 1.0f, ALIGN_RIGHT);
+
+    // Megalaser charge
     Texture* meterTex = TextureManager::Get("megameter");
+    float meterX = 437.0f, meterY = STATUSBAR_Y + 6.0f;
     if (meterTex) {
-        Renderer::DrawCel(meterTex, 0, 0, SCREEN_WIDTH - 150.0f, 46.0f, false);
+        float frac = std::clamp((float)mStats.megalaserCharge / 100.0f, 0.0f, 1.0f);
+        Rect src = { 0.0f, 0.0f, (float)meterTex->width * frac, (float)meterTex->height };
+        Rect dst = { meterX, meterY, src.w, src.h };
+        Renderer::DrawTexture(meterTex, dst, src);
     }
-    float meterW = 100.0f;
-    float fillW = meterW * ((float)mStats.megalaserCharge / 100.0f);
-    Renderer::DrawFillRect(SCREEN_WIDTH - 146.0f, 48.0f, fillW, 8.0f, { 0.2f, 0.7f, 1.0f, 0.95f });
-    FontRenderer::DrawString("Normal", "MEGA", SCREEN_WIDTH - 192.0f, 44.0f, { 0.2f, 0.7f, 1.0f, 1.0f }, 0.8f);
 }
 
 void GameEngine::RenderArmory() {
-    // PopCap authentic Armory Station (armory.jpg)
-    Texture* armoryTex = TextureManager::Get("armory");
-    if (armoryTex) {
-        float drawW = 725.0f;
-        float drawH = 544.0f;
-        float drawX = (SCREEN_WIDTH - drawW) * 0.5f;
-        Renderer::DrawTexture(armoryTex, drawX, 0.0f, drawW, drawH);
+    Renderer::DrawTexture(TextureManager::Get("armory"), 0.0f, 0.0f);
+
+    // Six weapon sockets baked into armory.jpg, three per side (measured from the art).
+    // Index order matches WeaponType.
+    static const float kRowY[3] = { 60.0f, 160.0f, 260.0f };
+    auto socketX = [](int i) { return (i < 3) ? 108.0f : 532.0f; };
+    auto levelX = [](int i) { return (i < 3) ? 40.0f : 602.0f; };
+
+    Texture* upgradesTex = TextureManager::Get("upgrades");     // 6 x 72x72
+    Texture* lvlTex = TextureManager::Get("upgradelvl");        // 4 x 20x31
+    Texture* btnTex = TextureManager::Get("upgradebtns");       // 2x2 +/- glows
+
+    for (int i = 0; i < WEAPON_COUNT; ++i) {
+        float cy = kRowY[i % 3];
+        if (upgradesTex) {
+            Renderer::DrawCel(upgradesTex, i, 0, socketX(i), cy, true);
+        }
+        if (lvlTex) {
+            int lvl = std::clamp(mStats.weaponLevels[i], 0, lvlTex->cols - 1);
+            Renderer::DrawCel(lvlTex, lvl, 0, levelX(i), cy, true);
+        }
+        if (mArmorySelection == i && btnTex) {
+            Renderer::SetAdditiveBlend(true);
+            float bx = (i < 3) ? 161.0f : 478.0f;
+            // Column 0 matches the left-hand sockets' buttons, column 1 the right-hand ones.
+            Renderer::DrawCel(btnTex, (i < 3) ? 0 : 1, 0, bx, cy - 14.5f, true);
+            Renderer::DrawCel(btnTex, (i < 3) ? 0 : 1, 1, bx, cy + 14.0f, true);
+            Renderer::SetAdditiveBlend(false);
+        }
     }
 
-    FontRenderer::DrawString("RubberStampLET20", "ARMORY UPGRADE STATION", SCREEN_WIDTH * 0.5f, 42.0f, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, ALIGN_CENTER);
-
-    std::string pointsText = "UPGRADE POINTS AVAILABLE: " + std::to_string(mStats.availableUpgradePoints);
-    FontRenderer::DrawString("Normal", pointsText, SCREEN_WIDTH * 0.5f, 75.0f, { 0.2f, 1.0f, 0.4f, 1.0f }, 1.0f, ALIGN_CENTER);
-
-    // Weapon icons (upgrades.png, 72x72 cels) & Level indicators (upgradelvl.jpg)
-    Texture* upgradesTex = TextureManager::Get("upgrades");
-    Texture* lvlTex = TextureManager::Get("upgradelvl");
-    Texture* btnTex = TextureManager::Get("upgradebtns");
-
+    // Central screen: selected weapon and remaining points.
     const char* weaponNames[WEAPON_COUNT] = {
         "HEAVY CANNON", "DEFENSE ORBS", "HOMING MISSILES", "LASER CANNON", "FLAK SHELLS", "THUNDERSTRIKE"
     };
+    FontRenderer::DrawString("Normal", weaponNames[mArmorySelection], 316.0f, 110.0f,
+                             { 0.6f, 1.0f, 0.6f, 1.0f }, 1.0f, ALIGN_CENTER);
+    FontRenderer::DrawString("Normal", "POINTS: " + std::to_string(mStats.availableUpgradePoints), 316.0f, 140.0f,
+                             { 0.6f, 1.0f, 0.6f, 1.0f }, 1.0f, ALIGN_CENTER);
 
-    float startY = 110.0f;
-    for (int i = 0; i < WEAPON_COUNT; ++i) {
-        float rowY = startY + (float)i * 55.0f;
-        float iconX = 180.0f;
-
-        // Selection highlight
-        if (mArmorySelection == i) {
-            Renderer::DrawFillRect(iconX - 25.0f, rowY - 18.0f, 620.0f, 48.0f, { 0.15f, 0.35f, 0.6f, 0.4f });
-            Renderer::DrawRect(iconX - 25.0f, rowY - 18.0f, 620.0f, 48.0f, { 0.3f, 0.7f, 1.0f, 0.8f });
-        }
-
-        // Weapon icon (72x72 cel scaled to 36x36)
-        if (upgradesTex) {
-            Renderer::DrawCel(upgradesTex, i, 0, iconX, rowY + 6.0f, true, 0.55f, 0.55f);
-        }
-
-        // Name
-        Color4f nameCol = (mArmorySelection == i) ? Color4f{ 1.0f, 0.9f, 0.2f, 1.0f } : Color4f{ 1.0f, 1.0f, 1.0f, 1.0f };
-        FontRenderer::DrawString("Normal", weaponNames[i], iconX + 30.0f, rowY, nameCol, 0.95f);
-
-        // Level indicator (upgradelvl.jpg)
-        int curLvl = mStats.weaponLevels[i];
-        if (lvlTex) {
-            int maxLvl = (i == WEAPON_CANNON) ? 5 : 3;
-            for (int p = 0; p < maxLvl; ++p) {
-                int frame = (p < curLvl) ? 1 : 0;
-                Renderer::DrawCel(lvlTex, frame, 0, 480.0f + (float)p * 26.0f, rowY + 6.0f, true, 1.0f, 1.0f);
-            }
-        }
-
-        // Plus / Minus buttons (upgradebtns.png)
-        if (btnTex) {
-            Renderer::DrawCel(btnTex, 0, 0, 640.0f, rowY + 6.0f, true, 0.65f, 0.65f); // Minus
-            Renderer::DrawCel(btnTex, 1, 0, 680.0f, rowY + 6.0f, true, 0.65f, 0.65f); // Plus
-        }
-    }
-
-    // Advance button (advancebtn.jpg)
     Texture* advanceTex = TextureManager::Get("advancebtn");
     if (advanceTex) {
-        Renderer::DrawTexture(advanceTex, SCREEN_WIDTH - 220.0f, SCREEN_HEIGHT - 70.0f, 140.0f, 45.0f);
+        // Strip of three 135px button states (normal / over / down); draw "normal".
+        float w = advanceTex->width / 3.0f;
+        Rect src = { 0.0f, 0.0f, w, (float)advanceTex->height };
+        Rect dst = { (SCREEN_WIDTH - w) * 0.5f, 420.0f, w, src.h };
+        Renderer::DrawTexture(advanceTex, dst, src);
     }
-    FontRenderer::DrawString("Computer", "D-PAD: SELECT/CHANGE    CROSS: DEPLOY", SCREEN_WIDTH * 0.5f, SCREEN_HEIGHT - 25.0f, { 0.2f, 1.0f, 0.3f, 1.0f }, 0.9f, ALIGN_CENTER);
 }
 
 void GameEngine::RenderPaused() {

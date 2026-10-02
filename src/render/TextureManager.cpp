@@ -9,130 +9,175 @@
 
 namespace HeavyWeapon {
 
+// Image table from the original executable (inner game image, VA 0x527820): 157 records
+// of { char name[40]; int cols; int rows; int flag; }, in the game's own load order.
+// The flag is set only on enemies, projectiles and pickups, so it most likely marks
+// sprites the game hit-tests per pixel.
 struct ImageMeta {
     const char* name;
     int cols;
     int rows;
+    bool hitTested;
 };
 
 static const ImageMeta sImageMetaTable[] = {
-    { "title", 1, 1 },
-    { "atomictank", 1, 1 },
-    { "statusbar", 1, 1 },
-    { "statuscovers", 1, 1 },
-    { "tank", 10, 1 },
-    { "tankshadow", 1, 1 },
-    { "gun", 21, 5 },
-    { "bullets", 21, 5 },
-    { "rotors", 7, 1 },
-    { "spark", 10, 1 },
-    { "dumbbomb", 10, 1 },
-    { "fragbomb", 10, 1 },
-    { "ironbomb", 10, 1 },
-    { "fatboy", 10, 1 },
-    { "fatboyflash", 1, 1 },
-    { "lgb", 21, 1 },
-    { "hellfire", 21, 1 },
-    { "crater", 5, 1 },
-    { "rock", 1, 1 },
-    { "tankflame", 20, 1 },
-    { "nukeicon", 1, 1 },
-    { "muzzleflash", 5, 1 },
-    { "powerups", 12, 1 },
-    { "shield", 10, 1 },
-    { "shieldzap", 10, 1 },
-    { "smoke", 1, 1 },
-    { "dialog", 1, 1 },
-    { "bombfrag", 1, 1 },
-    { "missile", 20, 1 },
-    { "flakflash", 5, 1 },
-    { "buttonbracket", 3, 1 },
-    { "button", 3, 1 },
-    { "buttonglow", 3, 1 },
-    { "tracks", 7, 1 },
-    { "armory", 1, 1 },
-    { "armoryglow", 1, 1 },
-    { "upgrades", 6, 1 },
-    { "upgradelvl", 4, 1 },
-    { "upgradebtns", 2, 2 },
-    { "upgradebubble", 1, 1 },
-    { "laserglare", 10, 1 },
-    { "rocket", 21, 1 },
-    { "upgradeglow", 1, 1 },
-    { "pupcopter", 1, 1 },
-    { "puprotor", 7, 1 },
-    { "copterblades", 10, 1 },
-    { "crates", 4, 1 },
-    { "casing", 1, 1 },
-    { "satlaser", 10, 1 },
-    { "enemygun", 10, 2 },
-    { "enemytankshadow", 1, 1 },
-    { "bolt", 5, 1 },
-    { "staticspark", 10, 1 },
-    { "staticglow", 5, 1 },
-    { "megameter", 1, 1 },
-    { "mainmenu", 1, 1 },
-    { "mainsmallbtn", 1, 1 },
-    { "mainbigbtn", 1, 1 },
-    { "mainglow", 1, 1 },
-    { "map", 1, 1 },
-    { "mappointer", 1, 1 },
-    { "maprect", 4, 1 },
-    { "megalaser", 4, 1 },
-    { "tankicon", 1, 1 },
-    { "largeinsignia", 19, 1 },
-    { "smallinsignia", 19, 1 },
-    { "nukebg", 1, 1 },
-    { "fire", 1, 1 },
-    { "orb", 2, 1 },
-    { "rpg", 10, 1 },
-    { "explosion", 20, 1 },
-    { "blimp", 1, 1 },
-    { "blimpprop", 5, 1 },
-    { "milemarker", 1, 1 },
-    { "miletext", 5, 1 },
-    { "tankflash", 1, 1 },
-    { "headmissile", 20, 1 },
-    { "sanddust", 1, 1 },
-    { "boulder", 5, 1 },
-    { "airmine", 5, 1 },
-    { "meteorite", 10, 1 },
-    { "bigdebris", 6, 1 },
-    { "rocketpod", 21, 1 },
-    { "flakguns", 21, 3 },
-    { "lasers", 21, 3 },
-    { "staticstrike", 1, 3 },
-    { "homing", 3, 1 },
-    { "laserburn", 10, 1 },
-    { "burstrocket", 8, 1 },
-    { "moon", 1, 1 },
-    { "mushfire", 3, 1 },
-    { "mushsmoke", 3, 1 },
-    { "medrotor", 6, 1 },
-    { "dozershadow", 1, 1 },
-    { "deflectshield", 4, 1 },
-    { "advancebtn", 1, 1 },
-    { "bulletglow", 2, 1 },
-    { "propfighter", 4, 1 },
-    { "smalljet", 1, 1 },
-    { "bomber", 1, 1 },
-    { "jetfighter", 1, 1 },
-    { "truck", 10, 1 },
-    { "bigbomber", 1, 1 },
-    { "smallcopter", 5, 1 },
-    { "medcopter", 7, 1 },
-    { "bigcopter", 9, 1 },
-    { "deltabomber", 1, 1 },
-    { "deltajet", 1, 1 },
-    { "bigmissile", 10, 2 },
-    { "superbomber", 1, 1 },
-    { "fatbomber", 1, 1 },
-    { "satellite", 10, 1 },
-    { "strafer", 10, 1 },
-    { "enemytank", 10, 1 },
-    { "dozer", 10, 1 },
-    { "deflector", 1, 1 },
-    { "cruise", 8, 1 }
+    { "title", 1, 1, false },
+    { "atomictank", 2, 1, false },
+    { "loadingframe", 1, 1, false },
+    { "loadinginside", 1, 1, false },
+    { "loadingslider", 1, 1, false },
+    { "loadingbullet", 1, 1, false },
+    { "loadingglow", 1, 1, false },
+    { "cursor_dragging", 1, 1, false },
+    { "cursor_hand", 1, 1, false },
+    { "cursor_pointer", 1, 1, false },
+    { "cursor_text", 1, 1, false },
+    { "statusbar", 1, 1, false },
+    { "backgrounds/antagonistan_sky", 1, 1, false },
+    { "backgrounds/antagonistan_bg", 1, 1, false },
+    { "backgrounds/antagonistan_bg2", 1, 1, false },
+    { "backgrounds/antagonistan_map", 1, 1, false },
+    { "backgrounds/antagonistan_ground", 1, 1, false },
+    { "tank", 10, 1, true },
+    { "tankshadow", 1, 1, false },
+    { "gun", 21, 5, false },
+    { "bullets", 21, 5, true },
+    { "rotors", 7, 1, false },
+    { "spark", 10, 1, false },
+    { "dumbbomb", 10, 1, true },
+    { "lgb", 21, 1, true },
+    { "hellfire", 21, 1, true },
+    { "crater", 5, 1, false },
+    { "rock", 1, 1, true },
+    { "tankflame", 20, 1, false },
+    { "nukeicon", 1, 1, false },
+    { "muzzleflash", 5, 1, false },
+    { "powerups", 12, 1, true },
+    { "shield", 10, 1, true },
+    { "shieldzap", 10, 1, false },
+    { "smoke", 1, 1, false },
+    { "dialog", 1, 1, false },
+    { "fragbomb", 10, 1, true },
+    { "bombfrag", 1, 1, true },
+    { "missile", 20, 1, true },
+    { "flakflash", 5, 1, true },
+    { "buttonbracket", 3, 1, false },
+    { "button", 3, 1, false },
+    { "buttonglow", 3, 1, false },
+    { "slidertrack", 1, 1, false },
+    { "sliderthumb", 1, 1, false },
+    { "checked", 1, 1, false },
+    { "unchecked", 1, 1, false },
+    { "tracks", 1, 1, false },
+    { "gasstation", 1, 1, false },
+    { "gassign", 1, 1, false },
+    { "gaspump", 1, 1, false },
+    { "armory", 1, 1, false },
+    { "upgrades", 6, 1, false },
+    { "laserglare", 10, 1, false },
+    { "rocket", 21, 1, true },
+    { "upgradeglow", 1, 1, false },
+    { "ironbomb", 10, 1, true },
+    { "pupcopter", 1, 1, true },
+    { "puprotor", 7, 1, false },
+    { "crates", 4, 1, true },
+    { "casing", 1, 1, false },
+    { "satlaser", 10, 1, false },
+    { "dontshoot", 1, 1, false },
+    { "beam", 1, 1, false },
+    { "beamfire", 5, 1, false },
+    { "beamfringe", 5, 1, false },
+    { "enemygun", 10, 2, false },
+    { "enemytankshadow", 1, 1, false },
+    { "upgradebubble", 1, 1, false },
+    { "armoryglow", 1, 1, false },
+    { "bolt", 5, 1, true },
+    { "staticspark", 10, 1, false },
+    { "staticglow", 5, 1, false },
+    { "megameter", 1, 1, false },
+    { "mainmenu", 1, 1, false },
+    { "mainsmallbtn", 1, 1, false },
+    { "mainbigbtn", 1, 1, false },
+    { "map", 1, 1, false },
+    { "mission1", 1, 1, false },
+    { "mission2", 1, 1, false },
+    { "mission3", 1, 1, false },
+    { "mission4", 1, 1, false },
+    { "mission5", 1, 1, false },
+    { "mission6", 1, 1, false },
+    { "mission7", 1, 1, false },
+    { "mission8", 1, 1, false },
+    { "mission9", 1, 1, false },
+    { "mission10", 1, 1, false },
+    { "upgradebtns", 2, 2, false },
+    { "mainglow", 1, 1, false },
+    { "tankicon", 1, 1, false },
+    { "mappointer", 1, 1, false },
+    { "megalaser", 4, 1, false },
+    { "maprect", 4, 1, false },
+    { "reinforcement", 1, 1, false },
+    { "largeinsignia", 19, 1, false },
+    { "smallinsignia", 19, 1, false },
+    { "nukebg", 1, 1, false },
+    { "fire", 1, 1, false },
+    { "orb", 2, 1, true },
+    { "rpg", 10, 1, true },
+    { "explosion", 20, 1, false },
+    { "blimpprop", 5, 1, false },
+    { "help", 1, 1, false },
+    { "mouse", 3, 1, false },
+    { "milemarker", 1, 1, false },
+    { "miletext", 5, 1, false },
+    { "tankflash", 1, 1, false },
+    { "headmissile", 20, 1, true },
+    { "sanddust", 1, 1, false },
+    { "boulder", 5, 1, true },
+    { "airmine", 5, 1, true },
+    { "meteorite", 10, 1, true },
+    { "bigdebris", 6, 1, false },
+    { "fatboy", 10, 1, true },
+    { "fatboyflash", 1, 1, false },
+    { "rocketpod", 21, 1, false },
+    { "flakguns", 21, 3, false },
+    { "lasers", 21, 3, false },
+    { "staticstrike", 1, 3, false },
+    { "homing", 3, 1, false },
+    { "upgradelvl", 4, 1, false },
+    { "laserburn", 10, 1, false },
+    { "statuscovers", 1, 1, false },
+    { "burstrocket", 8, 1, true },
+    { "moon", 1, 1, false },
+    { "mushfire", 3, 1, false },
+    { "mushsmoke", 3, 1, false },
+    { "medrotor", 6, 1, false },
+    { "dozershadow", 1, 1, false },
+    { "deflectshield", 4, 1, false },
+    { "credits", 1, 1, false },
+    { "atmenu", 1, 1, false },
+    { "danger", 1, 1, false },
+    { "advancebtn", 1, 1, false },
+    { "bulletglow", 2, 1, false },
+    { "propfighter", 4, 1, true },
+    { "smalljet", 1, 1, true },
+    { "bomber", 1, 1, true },
+    { "jetfighter", 1, 1, true },
+    { "truck", 10, 1, true },
+    { "bigbomber", 1, 1, true },
+    { "smallcopter", 5, 1, true },
+    { "medcopter", 7, 1, true },
+    { "bigcopter", 9, 1, true },
+    { "deltabomber", 1, 1, true },
+    { "deltajet", 1, 1, true },
+    { "bigmissile", 10, 2, true },
+    { "superbomber", 1, 1, true },
+    { "fatbomber", 1, 1, true },
+    { "blimp", 1, 1, true },
+    { "satellite", 10, 1, true },
+    { "strafer", 10, 1, true },
+    { "enemytank", 10, 1, true },
+    { "dozer", 10, 1, true },
+    { "deflector", 1, 1, true },
+    { "cruise", 8, 1, true },
 };
 
 static std::string NormalizeKey(const std::string& path) {
@@ -236,78 +281,79 @@ Texture TextureManager::LoadFromFiles(const std::string& colorPath, const std::s
     return tex;
 }
 
+// Finds the colour image for an asset base path (no extension) and its optional alpha
+// mask. PopCap stores colour and alpha separately as "name.ext" + "name_.ext" (or the
+// older "_name.ext"), with any mix of .png/.jpg/.gif.
+static bool FindImageFiles(const std::string& base, std::string& outColor, std::string& outMask) {
+    static const char* kExts[] = { ".png", ".jpg", ".gif" };
+    outColor.clear();
+    outMask.clear();
+    for (const char* ext : kExts) {
+        if (Vfs::Exists(base + ext)) {
+            outColor = base + ext;
+            break;
+        }
+    }
+    if (outColor.empty()) return false;
+
+    size_t slash = base.find_last_of('/');
+    std::string dir = (slash == std::string::npos) ? "" : base.substr(0, slash + 1);
+    std::string file = (slash == std::string::npos) ? base : base.substr(slash + 1);
+    for (const char* ext : kExts) {
+        for (const std::string& candidate : { base + "_" + ext, dir + "_" + file + ext }) {
+            if (Vfs::Exists(candidate)) {
+                outMask = candidate;
+                return true;
+            }
+        }
+    }
+    return true;
+}
+
+static std::string StripImageExtension(const std::string& path) {
+    size_t dot = path.find_last_of('.');
+    size_t slash = path.find_last_of("/\\");
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) return path;
+    std::string ext = path.substr(dot);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif") return path.substr(0, dot);
+    return path;
+}
+
 Texture* TextureManager::Load(const std::string& relativePath) {
     std::string key = NormalizeKey(relativePath);
     auto it = sTextures.find(key);
     if (it != sTextures.end()) {
-        return &it->second;
+        return it->second.id ? &it->second : nullptr;
     }
 
     int cols = 1, rows = 1;
     GetCelInfo(key, cols, rows);
 
-    // Try finding the file across standard formats
-    std::string colorPath = "";
-    std::string maskPath = "";
-
-    // Candidate base directories and names
-    std::vector<std::string> candidates = {
-        "Images/" + key,
-        key,
-        "Images/Backgrounds/" + key,
-        "Fonts/" + key
-    };
-
-    // If original string had a full relative path that exists directly, prefer it
-    if (Vfs::Exists(relativePath)) {
-        colorPath = relativePath;
-        size_t dot = relativePath.find_last_of('.');
-        if (dot != std::string::npos) {
-            std::string ext = relativePath.substr(dot);
-            if (ext == ".jpg" || ext == ".JPG") {
-                maskPath = relativePath.substr(0, dot) + "_.png";
-            }
-        }
-    } else {
-        for (const auto& base : candidates) {
-            if (Vfs::Exists(base + ".png")) {
-                colorPath = base + ".png";
-                break;
-            } else if (Vfs::Exists(base + ".jpg")) {
-                colorPath = base + ".jpg";
-                maskPath = base + "_.png";
+    std::string requested = StripImageExtension(relativePath);
+    std::string colorPath, maskPath;
+    bool found = FindImageFiles(requested, colorPath, maskPath);
+    if (!found) {
+        for (const std::string& base : { "Images/" + key, key, "Images/Backgrounds/" + key, "Fonts/" + key }) {
+            if (FindImageFiles(base, colorPath, maskPath)) {
+                found = true;
                 break;
             }
         }
     }
 
-    if (colorPath.empty()) {
+    if (!found) {
         std::cerr << "[TextureManager] File does not exist for asset: " << relativePath << " (key: " << key << ")" << std::endl;
+        sTextures[key] = Texture{}; // remember the miss so it is not searched for every frame
         return nullptr;
     }
 
-    std::string resolvedColor = Vfs::Resolve(colorPath);
-    Texture tex = LoadFromFiles(resolvedColor, maskPath, cols, rows);
-    if (tex.id == 0) {
-        return nullptr;
-    }
-
+    Texture tex = LoadFromFiles(Vfs::Resolve(colorPath), maskPath, cols, rows);
     sTextures[key] = tex;
-    // Also map full path for direct hits
-    sTextures[relativePath] = tex;
-    return &sTextures[key];
+    return tex.id ? &sTextures[key] : nullptr;
 }
 
 Texture* TextureManager::Get(const std::string& relativePath) {
-    std::string key = NormalizeKey(relativePath);
-    auto it = sTextures.find(key);
-    if (it != sTextures.end()) {
-        return &it->second;
-    }
-    it = sTextures.find(relativePath);
-    if (it != sTextures.end()) {
-        return &it->second;
-    }
     return Load(relativePath);
 }
 

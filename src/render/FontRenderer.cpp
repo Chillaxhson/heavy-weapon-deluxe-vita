@@ -49,20 +49,22 @@ bool FontRenderer::LoadFont(const std::string& fontName) {
     std::vector<char> chars;
     size_t charListPos = textData.find("Define CharList");
     if (charListPos != std::string::npos) {
-        size_t openParen = textData.find('(', charListPos);
-        size_t closeParen = textData.find(')', openParen);
-        if (openParen != std::string::npos && closeParen != std::string::npos) {
-            std::string sub = textData.substr(openParen, closeParen - openParen);
-            for (size_t i = 0; i < sub.size(); ++i) {
-                if (sub[i] == '\'') {
-                    if (i + 1 < sub.size()) {
-                        char c = sub[i + 1];
-                        if (c == '\\' && i + 2 < sub.size()) {
-                            c = sub[i + 2];
-                            i++;
-                        }
+        // Entries are quoted single characters, 'x' or "x" (used for the apostrophe), and the
+        // list itself contains ')' as a glyph, so scan token by token until an unquoted ')'.
+        size_t i = textData.find('(', charListPos);
+        if (i != std::string::npos) {
+            for (++i; i < textData.size() && textData[i] != ')'; ++i) {
+                char q = textData[i];
+                if ((q == '\'' || q == '"') && i + 2 < textData.size()) {
+                    char c = textData[i + 1];
+                    size_t close = i + 2;
+                    if (c == '\\' && i + 3 < textData.size()) {
+                        c = textData[i + 2];
+                        close = i + 3;
+                    }
+                    if (textData[close] == q) {
                         chars.push_back(c);
-                        i += 2;
+                        i = close;
                     }
                 }
             }

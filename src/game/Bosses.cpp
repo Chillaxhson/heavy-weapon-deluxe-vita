@@ -298,6 +298,167 @@ struct Battleship : Craft {
     }
 };
 
+// ---------------------------------------------------------------------------------
+// Rainer war blimp (0x441c30): drifts over the battlefield dropping roto-mines, and
+// lowers a tractor-beam dish that calls down meteor showers.
+// ---------------------------------------------------------------------------------
+
+// Roto-mine (0x447a30): falls while steering toward the tank. Shootable.
+struct AirMine : Hazard {
+    AirMine(Board& bd, double x_, double y_, double vx_, double vy_) : Hazard(bd, "airmine", x_, y_, vx_, vy_, false) {
+        hp = 20.0;
+        points = 40;
+    }
+    void Update() override {
+        x += vx;
+        y += vy;
+        if (vy < 3.0) vy += 0.02;
+        double steer = 0.1 - std::cos(y * 0.0032710416666666665) * 0.1;
+        vx += (b.TankX() <= x) ? -steer : steer;
+        vx = std::clamp(vx, -3.0, 3.0);
+        frame += 0.5;
+        if (frame >= 5.0) frame -= 5.0;
+        CheckGroundAndTank();
+    }
+};
+
+// Meteor (0x449510): streaks in from high above at a steep angle. Cannot be shot.
+struct Meteor : Hazard {
+    Meteor(Board& bd) : Hazard(bd, "meteorite", 0, 0, 0, 0, false) {
+        int cx = Rand() % 640 - 320;
+        double a = (double)(Rand() % 800) * 0.001 + 1.5701 - 0.4;
+        double d = (double)(Rand() % 1000) + 500.0;
+        double sp = (double)(Rand() % 100) * 0.01 + 3.0;
+        active = false;
+        x = d * std::cos(a) + cx;
+        y = 460.0 - std::sin(a) * d;
+        vx = -(std::cos(a) * sp);
+        vy = std::sin(a) * sp;
+    }
+    void Update() override {
+        x += vx;
+        y += vy;
+        if (y >= 0.0 && y - vy < 0.0) AudioSystem::PlaySoundId(SND_METEOR, b.Pan(x));
+        if (b.App().tick % 3 == 0) b.SpawnParticles(img, x, y, 0.0, 0.0, 1, 0.0, 0.0, 0.0, 60, true, -1);
+        CheckGroundAndTank();
+    }
+};
+
+struct Rainer : Craft {
+    Texture* dish;
+    Texture* prop;
+    Texture* beam;
+    double propFrame = 0.0;     // +0x80
+    double dishAngle = 0.0;     // +0x88 0 = stowed, pi/2 = lowered
+    bool beamOn = false;        // +0x90
+    bool entered = false;       // +0x48
+    int dishTimer, dishUp, dishDown, meteors;
+    int mineTimer = 0, mineDelay;
+    Rainer(Board& bd) : Craft(bd, 0, "pupcopter") {
+        img = Grid("Images/rainer/rainer", 1);
+        dish = Grid("Images/rainer/dish", 1);
+        prop = Grid("Images/rainer/prop", 8);
+        beam = Grid("Images/rainer/beam", 1);
+        const BossLevelDef* st = Stats(b, "Rainer");
+        hp = maxHp = st ? st->armor : 2700;
+        points = st ? st->score : 30000;
+        mineDelay = st ? st->fireInterval : 80;
+        dishUp = st ? st->dishUp : 400;
+        dishDown = dishTimer = st ? st->dishDown : 800;
+        meteors = st ? st->dishMeteors : 15;
+        boss = true;
+        persistent = true;
+        x = 520.0;
+        y = 200.0;
+        vx = -0.75;
+        vy = 0.0;
+    }
+    ~Rainer() override { AudioSystem::SetLoop(SND_TRACTORBEAM, false); }
+    void UpdateF() override {}
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Update();
+        if (x >= 20.0 || entered) {
+            // Wander, pulled back toward the centre and a cruising height of 200.
+            vx += ((double)(Rand() % 100) - 50.0) * 0.0005;
+            vx -= x * 0.00025;
+            vy += (200.0 - y) * 0.0005 + ((double)(Rand() % 100) - 50.0) * 0.00025;
+            vx = std::clamp(vx, -0.75, 0.75);
+            vy = std::clamp(vy, -0.25, 0.25);
+        } else {
+            entered = true;
+        }
+        x += vx;
+        y += vy;
+        propFrame += 0.5;
+        if (propFrame >= 8.0) propFrame -= 8.0;
+
+        if (entered) {
+            if (!beamOn || b.TankDead()) {
+                AudioSystem::SetLoop(SND_TRACTORBEAM, false);
+                beamOn = false;
+                if (dishAngle > 0.0) dishAngle -= 0.01;
+                if (dishTimer-- < 0) {
+                    beamOn = true;
+                    dishTimer = dishUp;
+                }
+            } else {
+                if (dishAngle < 1.5701) dishAngle += 0.01;
+                if (b.NukeFlash() == 0.0 && !b.BossDying()) {
+                    if (dishTimer-- < 0) {
+                        AudioSystem::SetLoop(SND_TRACTORBEAM, false);
+                        beamOn = false;
+                        dishTimer = dishDown;
+                        for (int i = 0; i < meteors; ++i) b.AddHazard(std::make_unique<Meteor>(b));
+                    } else if (dishAngle > 1.56) {
+                        AudioSystem::SetLoop(SND_TRACTORBEAM, true, b.Pan(x));
+                    }
+                }
+            }
+        }
+
+        // Roto-mines drop only while the dish is stowed.
+        if (b.TankDead() || !entered || dishAngle > 0.02) mineTimer = mineDelay;
+        else --mineTimer;
+        if (mineTimer < 1 && b.NukeFlash() == 0.0 && !b.BossDying()) {
+            b.AddHazard(std::make_unique<AirMine>(b, x, y - 115.0, (double)(Rand() % 400) * 0.01 - 2.0, -1.0));
+            AudioSystem::PlaySoundId(SND_AIRMINE, b.Pan(x));
+            mineTimer = mineDelay;
+        }
+        if (b.BossDying()) AudioSystem::SetLoop(SND_TRACTORBEAM, false);
+    }
+    void Tint() {
+        if (flash != 0) {
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(255, 255 - flash, 255 - flash);
+        }
+    }
+    void Draw() override {
+        if (b.Progress() < b.Length()) return;
+        Tint();
+        Gfx::DrawSprite(dish, (int)x, (int)(y - 80.0 - std::sin(dishAngle) * 44.0), true);
+        Gfx::SetColorizeImages(false);
+        Craft::Draw();
+        Tint();
+        Gfx::DrawSprite(prop, (int)(x - 139.0), (int)(y - 96.0), true, (int)propFrame, 0, true);
+        Gfx::DrawSprite(prop, (int)(x + 140.0), (int)(y - 96.0), true, (int)propFrame, 0, false);
+        Gfx::SetColorizeImages(false);
+        if (beamOn && dishAngle > 1.56 && !b.BossDying()) {
+            // The beam texture scrolls upward through a 162px window.
+            Gfx::SetDrawMode(1);
+            int sy = 37 - (b.App().tick * 3) % 38;
+            Gfx::DrawImageRect(beam, (int)(x - 25.0), (int)(y - 299.0), 50, 162, 0, sy, 50, 162);
+            Gfx::SetDrawMode(0);
+        }
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+    }
+};
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
@@ -305,6 +466,7 @@ std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
     switch (kind) {
         case 0: return std::make_unique<BossCopter>(b);
         case 1: return std::make_unique<Battleship>(b);
+        case 2: return std::make_unique<Rainer>(b);
         default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
     }
 }

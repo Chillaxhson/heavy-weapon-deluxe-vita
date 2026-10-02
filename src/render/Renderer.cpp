@@ -125,6 +125,24 @@ void Renderer::DrawTextureRotated(const Texture* tex, const Rect& dst, const Rec
     glPopMatrix();
 }
 
+void Renderer::DrawCel(const Texture* tex, int col, int row, float x, float y, bool centered, float scaleX, float scaleY, float angleDegrees) {
+    if (!tex || tex->id == 0) return;
+
+    float celW = (float)tex->GetCelWidth();
+    float celH = (float)tex->GetCelHeight();
+    Rect src = { (float)col * celW, (float)row * celH, celW, celH };
+
+    float dw = celW * scaleX;
+    float dh = celH * scaleY;
+    Rect dst = centered ? Rect{ x - dw * 0.5f, y - dh * 0.5f, dw, dh } : Rect{ x, y, dw, dh };
+
+    if (angleDegrees != 0.0f) {
+        DrawTextureRotated(tex, dst, src, angleDegrees);
+    } else {
+        DrawTexture(tex, dst, src);
+    }
+}
+
 void Renderer::DrawRect(float x, float y, float w, float h, const Color4f& color) {
     glDisable(GL_TEXTURE_2D);
     glColor4f(color.r, color.g, color.b, color.a);

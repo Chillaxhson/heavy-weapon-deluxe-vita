@@ -39,6 +39,9 @@ private:
     PlayerTank mPlayerTank;
     std::vector<Enemy> mEnemies;
     std::vector<Projectile> mProjectiles;
+    std::vector<ExplosionInstance> mExplosions;
+    std::vector<CraterInstance> mCraters;
+    std::vector<PowerUpItem> mPowerUps;
     std::vector<Particle> mParticles;
 
     // Wave spawning state
@@ -46,11 +49,20 @@ private:
     size_t mCurrentWaveIndex = 0;
     float mWaveTimer = 0.0f;
     float mLevelProgress = 0.0f;
+    float mLevelLength = 1000.0f;
     float mSpawnTimer = 0.0f;
     bool mBossSpawned = false;
 
+    // Menu & UI State
+    int mMenuSelection = 0;
+    int mArmorySelection = 0;
+    float mMenuGlowAnim = 0.0f;
+    float mDieselSoundTimer = 0.0f;
+
     // FX State
     float mNukeFlashAlpha = 0.0f;
+    float mMushCloudTimer = 0.0f;
+    float mMushCloudX = 480.0f;
 
     // Internal state updates
     void UpdateTitle(float dt);
@@ -73,7 +85,7 @@ private:
     void StartLevel(int levelIndex);
     void SpawnNextEnemy();
     void TriggerNuke();
-    void SpawnExplosion(float x, float y, float size = 20.0f, bool isBoss = false);
+    void SpawnExplosion(float x, float y, float size = 1.0f, bool isNuke = false);
 };
 
 } // namespace HeavyWeapon

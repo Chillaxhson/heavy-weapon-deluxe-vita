@@ -44,6 +44,9 @@ public:
     // Draw rotated texture around center or custom pivot
     static void DrawTextureRotated(const Texture* tex, const Rect& dst, const Rect& src, float angleDegrees, float pivotX = -1.0f, float pivotY = -1.0f);
 
+    // Draw sprite cel using texture columns and rows grid
+    static void DrawCel(const Texture* tex, int col, int row, float x, float y, bool centered = true, float scaleX = 1.0f, float scaleY = 1.0f, float angleDegrees = 0.0f);
+
     // Draw primitives
     static void DrawRect(float x, float y, float w, float h, const Color4f& color);
     static void DrawFillRect(float x, float y, float w, float h, const Color4f& color);

@@ -13,6 +13,11 @@ bool InputManager::sPrevFireMegalaser = false;
 bool InputManager::sPrevPause = false;
 bool InputManager::sPrevConfirm = false;
 bool InputManager::sPrevCancel = false;
+bool InputManager::sPrevUp = false;
+bool InputManager::sPrevDown = false;
+bool InputManager::sPrevLeft = false;
+bool InputManager::sPrevRight = false;
+bool InputManager::sPrevAltFire = false;
 bool InputManager::sPrevTouch = false;
 
 void InputManager::Init() {
@@ -37,9 +42,14 @@ void InputManager::Update() {
     sState.fireCannonPressed = false;
     sState.fireNukePressed = false;
     sState.fireMegalaserPressed = false;
+    sState.altFirePressed = false;
     sState.pausePressed = false;
     sState.confirmPressed = false;
     sState.cancelPressed = false;
+    sState.upPressed = false;
+    sState.downPressed = false;
+    sState.leftPressed = false;
+    sState.rightPressed = false;
     sState.touchPressed = false;
     sState.touchReleased = false;
 
@@ -70,9 +80,14 @@ void InputManager::Update() {
     bool btnCannon = false;
     bool btnNuke = false;
     bool btnLaser = false;
+    bool btnAltFire = false;
     bool btnPause = false;
     bool btnConfirm = false;
     bool btnCancel = false;
+    bool btnUp = false;
+    bool btnDown = false;
+    bool btnLeft = false;
+    bool btnRight = false;
 
     if (sController) {
         // Left Stick Movement
@@ -82,10 +97,15 @@ void InputManager::Update() {
             moveX = normMoveX;
         }
 
-        // D-Pad override
-        if (SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) {
+        // D-Pad buttons
+        btnUp = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_DPAD_UP);
+        btnDown = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+        btnLeft = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+        btnRight = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+
+        if (btnLeft) {
             moveX = -1.0f;
-        } else if (SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
+        } else if (btnRight) {
             moveX = 1.0f;
         }
 
@@ -125,6 +145,7 @@ void InputManager::Update() {
                   SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 
         btnLaser = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_X);
+        btnAltFire = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_Y);
         btnPause = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_START);
         btnConfirm = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_A);
         btnCancel = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_B);
@@ -139,16 +160,26 @@ void InputManager::Update() {
     if (btnCannon && !sPrevFireCannon) sState.fireCannonPressed = true;
     if (btnNuke && !sPrevFireNuke) sState.fireNukePressed = true;
     if (btnLaser && !sPrevFireMegalaser) sState.fireMegalaserPressed = true;
+    if (btnAltFire && !sPrevAltFire) sState.altFirePressed = true;
     if (btnPause && !sPrevPause) sState.pausePressed = true;
     if (btnConfirm && !sPrevConfirm) sState.confirmPressed = true;
     if (btnCancel && !sPrevCancel) sState.cancelPressed = true;
+    if (btnUp && !sPrevUp) sState.upPressed = true;
+    if (btnDown && !sPrevDown) sState.downPressed = true;
+    if (btnLeft && !sPrevLeft) sState.leftPressed = true;
+    if (btnRight && !sPrevRight) sState.rightPressed = true;
 
     sPrevFireCannon = btnCannon;
     sPrevFireNuke = btnNuke;
     sPrevFireMegalaser = btnLaser;
+    sPrevAltFire = btnAltFire;
     sPrevPause = btnPause;
     sPrevConfirm = btnConfirm;
     sPrevCancel = btnCancel;
+    sPrevUp = btnUp;
+    sPrevDown = btnDown;
+    sPrevLeft = btnLeft;
+    sPrevRight = btnRight;
 }
 
 } // namespace HeavyWeapon

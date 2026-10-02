@@ -8,6 +8,12 @@ struct InputState {
     // Movement
     float moveAxisX = 0.0f; // -1.0 to 1.0 (Left stick / D-Pad)
 
+    // Navigation buttons
+    bool upPressed = false;
+    bool downPressed = false;
+    bool leftPressed = false;
+    bool rightPressed = false;
+
     // Aiming
     bool hasAimInput = false;
     float aimAngleDegrees = -90.0f; // -90 is straight up, -180 is left, 0 is right
@@ -19,6 +25,7 @@ struct InputState {
     bool fireCannonPressed = false;
     bool fireNukePressed = false;
     bool fireMegalaserPressed = false;
+    bool altFirePressed = false;
     bool pausePressed = false;
     bool confirmPressed = false;
     bool cancelPressed = false;
@@ -48,6 +55,11 @@ private:
     static bool sPrevPause;
     static bool sPrevConfirm;
     static bool sPrevCancel;
+    static bool sPrevUp;
+    static bool sPrevDown;
+    static bool sPrevLeft;
+    static bool sPrevRight;
+    static bool sPrevAltFire;
     static bool sPrevTouch;
 };
 

@@ -12,8 +12,11 @@ public:
     static void Shutdown();
 
     // Sound effects
-    static void PlaySound(const std::string& name, float volume = 1.0f, int loops = 0);
+    static void PlaySound(const std::string& name, float volumeMultiplier = 1.0f, int loops = 0);
     static void PreloadSound(const std::string& name);
+
+    // Engine diesel sound loop
+    static void UpdateEngineSound(bool moving);
 
     // Music
     static void PlayMusic(const std::string& path, bool loop = true);
@@ -29,6 +32,9 @@ private:
     static Mix_Music* sCurrentMusic;
     static int sMusicVolume;
     static int sSfxVolume;
+    static int sEngineChannel;
+
+    static float GetDefaultVolume(const std::string& name);
 };
 
 } // namespace HeavyWeapon

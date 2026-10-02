@@ -174,6 +174,7 @@ bool FontRenderer::LoadFont(const std::string& fontName) {
 }
 
 float FontRenderer::GetStringWidth(const std::string& fontName, const std::string& text, float scale) {
+    if (fontName == "Outlined") return GetStringWidth("Normal", text, scale);
     auto it = sFonts.find(fontName);
     if (it == sFonts.end()) {
         if (!sFonts.empty()) it = sFonts.begin();
@@ -201,14 +202,23 @@ float FontRenderer::GetStringHeight(const std::string& fontName, float scale) {
     return 20.0f * scale;
 }
 
+// "Outlined" is a two-layer PopCap font (Outlined.txt): the Outline glyphs tinted black
+// behind the Normal glyphs. It is drawn as that pair.
+static std::string MainLayer(const std::string& fontName) {
+    return fontName == "Outlined" ? "Normal" : fontName;
+}
+
 int FontRenderer::GetAscent(const std::string& fontName) {
-    auto it = sFonts.find(fontName);
+    auto it = sFonts.find(MainLayer(fontName));
     return it == sFonts.end() ? 0 : it->second.ascent;
 }
 
 void FontRenderer::DrawStringBaseline(const std::string& fontName, const std::string& text, int x, int y,
                                       const Color4f& color, TextAlign align) {
-    DrawString(fontName, text, (float)x, (float)(y - GetAscent(fontName)), color, 1.0f, align);
+    if (fontName == "Outlined") {
+        DrawString("Outline", text, (float)x, (float)(y - GetAscent("Outline")), { 0.0f, 0.0f, 0.0f, color.a }, 1.0f, align);
+    }
+    DrawString(MainLayer(fontName), text, (float)x, (float)(y - GetAscent(fontName)), color, 1.0f, align);
 }
 
 void FontRenderer::DrawString(const std::string& fontName, const std::string& text, float x, float y, const Color4f& color, float scale, TextAlign align) {

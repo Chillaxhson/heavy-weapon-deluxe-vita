@@ -58,6 +58,9 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
             mApp.up[UP_SPREAD] = std::min(opts.armoryLevel, 4);
         }
         StartLevel(mCurrentLevelIndex);
+        if (opts.startProgress != -1) {
+            mBoard->SetProgress(opts.startProgress >= 0 ? opts.startProgress : mBoard->Length() + opts.startProgress);
+        }
     } else if (opts.startState == "armory") {
         mUpgradePoints = 3;
         mState = STATE_ARMORY;
@@ -117,6 +120,7 @@ void GameEngine::Update(float dt) {
         case STATE_ARMORY:         UpdateArmory(dt); break;
         case STATE_PAUSED:         UpdatePaused(dt); break;
         case STATE_GAMEOVER:       UpdateGameOver(dt); break;
+        case STATE_DEBRIEF:        UpdateDebrief(); break;
         default: break;
     }
 }
@@ -217,6 +221,7 @@ void GameEngine::UpdateMissionSelect(float dt) {
 void GameEngine::StartLevel(int levelIndex) {
     mCurrentLevelIndex = levelIndex;
     mApp.mission = levelIndex;
+    mApp.lives = 3;   // every mission starts with three tanks (0x403e20)
     mTickAccum = 0.0f;
     mLevelEndTimer = 0;
 
@@ -288,14 +293,104 @@ void GameEngine::UpdatePlaying(float dt) {
         return;
     }
 
-    // Placeholder level end until the boss and level-complete screens are ported: once
-    // the level length is reached, move on to the armory after a short pause.
-    if (mBoard->Progress() >= mBoard->Length()) {
-        if (++mLevelEndTimer == 1) AudioSystem::PlaySoundId(SND_V_LEVELCOMPLETE);
-        if (mLevelEndTimer > 180) {
-            mUpgradePoints++;
-            mState = STATE_ARMORY;
+    if (mBoard->IsLevelComplete()) {
+        // Debriefing bonuses (0x426e60), scaled by the mission number.
+        Debrief d;
+        int m = mApp.mission + 1;
+        d.kills = mBoard->Kills();
+        d.percent = mBoard->Spawned() > 0 ? (int)((double)mBoard->Kills() / mBoard->Spawned() * 100.0) : 0;
+        d.killBonus = d.percent == 100 ? m * 10000 : d.percent >= 95 ? m * 5000 : d.percent >= 90 ? m * 1000 : 0;
+        d.friendlyBonus = mBoard->FriendlyKills() == 0 ? m * 5000 : 0;
+        d.survivalBonus = mApp.lives == 2 ? m * 5000 : 0;
+        d.lost = 2 - mApp.lives;
+        d.score = mApp.score;
+        mApp.score += d.killBonus + d.friendlyBonus + d.survivalBonus;
+        d.rank = std::min(mApp.mission + 1, 19);
+        mDebrief = d;
+        AudioSystem::StopAllLoops();
+        AudioSystem::PlaySoundId(SND_V_LEVELCOMPLETE);
+        mState = STATE_DEBRIEF;
+    }
+}
+
+void GameEngine::UpdateDebrief() {
+    const InputState& input = InputManager::GetState();
+    ++mDebrief.timer;
+    // A stat line appears every 40 frames, each with a beep.
+    if (mDebrief.timer > 60 && mDebrief.timer <= 60 + 7 * 40 && (mDebrief.timer - 60) % 40 == 0) {
+        AudioSystem::PlaySoundId(SND_STATBEEP);
+    }
+    if (mDebrief.timer > 60 && (input.confirmPressed || input.touchPressed)) {
+        AudioSystem::PlaySoundId(SND_BUTTONDOWN);
+        mUpgradePoints++;
+        mState = STATE_ARMORY;
+    }
+}
+
+void GameEngine::RenderDebrief() {
+    if (mBoard) mBoard->Draw();
+    static const char* kRanks[20] = {
+        "PRIVATE", "PRIVATE FIRST CLASS", "CORPORAL", "SERGEANT", "SERGEANT FIRST CLASS", "MASTER SERGEANT",
+        "FIRST SERGEANT", "WARRANT OFFICER", "CHIEF WARRANT OFFICER", "SECOND LIEUTENANT", "FIRST LIEUTENANT",
+        "CAPTAIN", "MAJOR", "LIEUTENANT COLONEL", "COLONEL", "MAJOR GENERAL", "LIEUTENANT GENERAL", "GENERAL",
+        "GENERAL OF THE ARMY", "ULTIMATE TANKER"
+    };
+    const Debrief& d = mDebrief;
+    // Panels fade in (0x427460): dark report area, grey rank panel, divider line.
+    float a = std::min(d.timer * 4, 200) / 255.0f;
+    Renderer::DrawFillRect(0, 0, 480, 480, { 0, 0, 0, a });
+    Renderer::DrawFillRect(480, 0, 160, 480, { 0.5f, 0.5f, 0.5f, std::min(a * 1.75f, 1.0f) });
+    Renderer::DrawFillRect(479, 0, 3, 480, { 0, 0, 0, 1 });
+    if (d.timer < 30) return;
+
+    const Color4f white = Color4f::White();
+    float tw = FontRenderer::GetStringWidth("RubberStampLET42", "DEBRIEFING");
+    FontRenderer::DrawStringBaseline("RubberStampLET42", "DEBRIEFING", (int)(240 - tw / 2), 100, white);
+    Renderer::DrawCel(TextureManager::Get("largeinsignia"), d.rank, 0, 560, 200, true);
+    float pw = FontRenderer::GetStringWidth("Outlined", "PROMOTION!");
+    FontRenderer::DrawStringBaseline("Outlined", "PROMOTION!", (int)(560 - pw / 2), 100, white);
+    // Rank name, split over two lines when it does not fit the 160px panel.
+    std::string rank = kRanks[d.rank], second;
+    if (FontRenderer::GetStringWidth("Outlined", rank) > 150.0f) {
+        size_t cut = rank.rfind(' ');
+        if (cut != std::string::npos) {
+            second = rank.substr(cut + 1);
+            rank = rank.substr(0, cut);
         }
+    }
+    float rw = FontRenderer::GetStringWidth("Outlined", rank);
+    FontRenderer::DrawStringBaseline("Outlined", rank, (int)(560 - rw / 2), 300, white);
+    if (!second.empty()) {
+        float sw = FontRenderer::GetStringWidth("Outlined", second);
+        FontRenderer::DrawStringBaseline("Outlined", second, (int)(560 - sw / 2), 322, white);
+    }
+
+    struct Line { const char* label; std::string value; };
+    std::vector<Line> lines = {
+        { "TOTAL SCORE:", std::to_string(d.score) },
+        { "ENEMIES DESTROYED:", std::to_string(d.kills) },
+        { "KILL PERCENTAGE:", std::to_string(d.percent) + "%" },
+        { "FRIENDLY FIRE BONUS:", std::to_string(d.friendlyBonus) },
+        { "SURVIVAL BONUS:", std::to_string(d.survivalBonus) },
+        { "REINFORCEMENTS:", "" },
+        { d.percent == 100 ? "TOTAL DESTRUCTION:" : d.percent >= 95 ? "MASSIVE DESTRUCTION:" : "MAJOR DESTRUCTION:",
+          std::to_string(d.killBonus) },
+    };
+    static const int kY[7] = { 150, 195, 225, 255, 285, 315, 345 };
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (d.timer < 60 + (int)i * 40) break;
+        FontRenderer::DrawStringBaseline("RubberStampLET20", lines[i].label, 20, kY[i], white);
+        float vw = FontRenderer::GetStringWidth("RubberStampLET20", lines[i].value);
+        FontRenderer::DrawStringBaseline("RubberStampLET20", lines[i].value, (int)(460 - vw), kY[i], white);
+        if (i == 5) {
+            Texture* r = TextureManager::Get("reinforcement");
+            for (int k = 0; k < mApp.lives && r; ++k) Renderer::DrawCel(r, 0, 0, 300 + k * 30, kY[i] - 8, true);
+        }
+    }
+    if (Texture* adv = TextureManager::Get("advancebtn")) {
+        Rect src = { 0, 0, 135, 45 };
+        Rect dst = { 495, 420, 135, 45 };
+        Renderer::DrawTexture(adv, dst, src);
     }
 }
 
@@ -371,6 +466,7 @@ void GameEngine::Render() {
         case STATE_ARMORY:         RenderArmory(); break;
         case STATE_PAUSED:         RenderPlaying(); RenderPaused(); break;
         case STATE_GAMEOVER:       RenderPlaying(); RenderGameOver(); break;
+        case STATE_DEBRIEF:        RenderDebrief(); break;
         default: break;
     }
 

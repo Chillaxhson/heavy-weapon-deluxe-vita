@@ -65,7 +65,8 @@ enum GameState {
     STATE_ARMORY,
     STATE_PAUSED,
     STATE_GAMEOVER,
-    STATE_VICTORY
+    STATE_VICTORY,
+    STATE_DEBRIEF
 };
 
 } // namespace HeavyWeapon

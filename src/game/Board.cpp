@@ -62,14 +62,24 @@ void Board::Update() {
     UpdateF();
 
     if (mRespawn < 1) {
+        mDeployed = true;
         UpdateOrbs();
         // Level progress halts at the end of the level until the boss is beaten;
         // survival mode runs at double rate and never ends.
         if (mProgress != mLength || mSurvival) ++mProgress;
         if (mSurvival) ++mProgress;
     } else {
-        // Respawn countdown (+0x80): 400 ticks after a death. lives counts spare tanks,
-        // and one is used when the countdown runs out.
+        // Deploy countdown (+0x80): 300 ticks at the start of a level, 400 after a death.
+        // lives counts the tanks in reserve; deploying one uses a life.
+        if (mRespawn == 300 && mDeployed) {
+            if (mApp.lives < 1) {
+                AudioSystem::PlaySoundId(SND_V_GAMEOVER, 0);
+                ShowMessage("GAME OVER");
+            } else {
+                AudioSystem::PlaySoundId(SND_V_GETREADY, 0);
+                ShowMessage("GET READY");
+            }
+        }
         if (mRespawn > 1) --mRespawn;
         if (mRespawn == 1) {
             if (mApp.lives == 0) {
@@ -80,6 +90,22 @@ void Board::Update() {
             }
         }
     }
+
+    if (!mSurvival) {
+        // The boss arrives as the level runs out. Bosses are not ported yet, so the
+        // post-boss sequence (gas station, then the debriefing) starts straight away.
+        // The counter waits at mLength for the boss; its death pushes it on (0x4138e0).
+        if (mProgress == mLength && mCrafts.empty()) BossDefeated();
+        // A mile sign passes every 5000 ticks.
+        if (mProgress > 0 && mProgress < mLength && mProgress % 5000 == 0) --mMile;
+    }
+    if (mMile < 0) --mMile;
+    if (mMile < -0x2c1) mMile = 0;
+
+    for (auto& m : mMessages) {
+        for (auto& z : m.z) z -= 0.3;
+    }
+    EraseIf(mMessages, [](const BigMessage& m) { return m.z.empty() || m.z.back() < -80.0; });
 
     ++mApp.tick;
     if (mNukeFlash != 0.0) mNukeFlash -= 0.75;
@@ -621,6 +647,60 @@ void Board::SpawnExplosion(double x, double y, int w, int h, double vx, double v
     AudioSystem::PlaySoundId(SND_SMALLEXPLODE, Pan(x));
 }
 
+// 0x4138e0, after the boss's death animation: everything in the air is destroyed and
+// the refuelling stop rolls in.
+void Board::BossDefeated() {
+    for (auto& c : mCrafts) {
+        if (!c->dead) {
+            c->Die();
+            c->Remove();
+        }
+    }
+    mShake = 254;
+    mNukeFlash = 255.0;
+    EraseIf(mBullets, [](const Bullet& b) { return b.enemy; });
+    for (auto& h : mHazards) h->Remove();
+    mWaves.clear();
+    AudioSystem::PlaySoundId(SND_BOSSBLAST, 0);
+    mGasX = 480.0;
+    ++mProgress;
+    mGasName = Rand() & 3;
+}
+
+void Board::ShowMessage(const std::string& text) {
+    BigMessage m;
+    m.text = text;
+    for (size_t i = 0; i < text.size(); ++i) m.z.push_back(9.0 + 2.0 * i);
+    mMessages.push_back(m);
+}
+
+// Big centred messages (0x41cae0): each letter zooms in from depth and fades in,
+// holds, then fades out.
+void Board::DrawMessages() {
+    const char* font = "RubberStampLET42";
+    for (const auto& m : mMessages) {
+        float total = FontRenderer::GetStringWidth(font, m.text);
+        float x = 320.0f - total / 2.0f;
+        for (size_t i = 0; i < m.text.size(); ++i) {
+            std::string ch(1, m.text[i]);
+            float w = FontRenderer::GetStringWidth(font, ch);
+            double z = m.z[i];
+            if (z <= 8.0) {
+                double fade = std::max(z * 32.0, 0.0);
+                if (z <= -70.0) fade = std::min((z + 70.0) * -50.0, 255.0);
+                float alpha = (float)(255.0 - fade) / 255.0f;
+                float scale = (float)(std::max(z, 1.0) * 0.25 + 0.75);
+                float cx = x + w / 2.0f;
+                float cy = 240.0f;
+                float h = FontRenderer::GetStringHeight(font) * scale;
+                FontRenderer::DrawString(font, ch, cx - w * scale / 2.0f, cy - h / 2.0f,
+                                         { 1.0f, 1.0f, 1.0f, std::clamp(alpha, 0.0f, 1.0f) }, scale);
+            }
+            x += w;
+        }
+    }
+}
+
 // 0x411540: a row of 2n+1 craters, with smoke and debris.
 void Board::SpawnCraters(int x, int n) {
     for (int i = -n; i <= n; ++i) {
@@ -798,12 +878,28 @@ void Board::Draw() {
     Gfx::SetColorizeImages(false);
     applyNukeTint();
 
+    // Mile sign, every 5000 ticks.
+    if (mMile < 0 && !mSurvival) {
+        Gfx::DrawSprite(Img("milemarker"), mMile + 640, 350);
+        int miles = (mLength - mProgress) / 5000;
+        if (miles < 5 && miles >= 0) Gfx::DrawSprite(Img("miletext"), mMile + 650, 372, false, miles);
+    }
+
     Gfx::DrawSprite(WorldRenderer::Ground(), (int)mGroundX, 420);
     Gfx::DrawSprite(WorldRenderer::Ground(), (int)(mGroundX + 640.0f), 420);
     WorldRenderer::RenderAnims(1);
 
     // Everything below is in world space.
     Gfx::Translate(320, 0);
+
+    // The refuelling stop after the boss.
+    static const char* kGasNames[4] = { "NUKE n GO", "GROUND ZERO GAS", "ROD'S FUEL RODS", "NED'S NUKES" };
+    if (mGasX < 1000.0) {
+        Gfx::DrawSprite(Img("gasstation"), (int)mGasX, 405, true);
+        int w = (int)FontRenderer::GetStringWidth("StationFont", kGasNames[mGasName]);
+        FontRenderer::DrawStringBaseline("StationFont", kGasNames[mGasName], (int)mGasX - w / 2 + Gfx::TransX(), 350, Color4f::White());
+        Gfx::DrawSprite(Img("gassign"), (int)mGasX - 135, 350, true);
+    }
 
     // Tread marks.
     if (Texture* tr = Img("tracks")) {
@@ -841,6 +937,10 @@ void Board::Draw() {
 
     for (const auto& c : mCasings) {
         Gfx::DrawSprite(Img("casing"), (int)c.x, (int)c.y, true);
+    }
+    if (mGasX < 1000.0) {
+        Gfx::DrawSprite(Img("gaspump"), (int)mGasX - 65, 455, true);
+        Gfx::DrawSprite(Img("gaspump"), (int)mGasX + 55, 455, true);
     }
 
     // Shield hit flash.
@@ -949,6 +1049,7 @@ void Board::Draw() {
     }
 
     Gfx::Translate(-320, 0);
+    DrawMessages();
     DrawHUD();
 }
 

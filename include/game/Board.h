@@ -10,6 +10,7 @@
 #include "game/AppState.h"
 #include "DataModels.h"
 #include "Renderer.h"
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -37,8 +38,19 @@ public:
     void SetDriveOverride(bool active, float axis) { mDriveOverride = active; mDriveAxis = axis; }
 
     bool IsGameOver() const { return mGameOver; }
+    bool IsLevelComplete() const { return !mSurvival && mProgress >= mLength + 500; }
+    // Debriefing statistics (+0x328 kills, +0x32c craft spawned, +0x340 friendlies lost).
+    int Kills() const { return mKills; }
+    int Spawned() const { return mSpawned; }
+    int FriendlyKills() const { return mFriendlyKills; }
+    void CountCraft(int spawned, int killed, int friendlyKilled) {
+        mSpawned += spawned;
+        mKills += killed;
+        mFriendlyKills += friendlyKilled;
+    }
     int Progress() const { return mProgress; }
     int Length() const { return mLength; }
+    void SetProgress(int p) { mProgress = std::max(0, std::min(p, mLength)); }
     double TankX() const { return mTankX; }
     int TankY() const { return mTankY; }
 
@@ -131,6 +143,10 @@ private:
     };
     struct CloudPuff { double x, y, vx, vy; int frame; double life; };
     struct Track { double x0, x1; bool active; };             // list +0x254
+    struct BigMessage {                                       // 0x41c810 "GET READY" etc.
+        std::string text;
+        std::vector<double> z;      // per-letter depth: letters zoom in one after another
+    };
     struct Mushroom {                                       // nuke cloud (0x4282e0)
         double x = 0.0, alpha = 1024.0;
         std::vector<CloudPuff> smoke, fire;
@@ -160,7 +176,7 @@ private:
     double mCycle = 0.0;        // +0x140
     double mShieldFlash = 0.0;  // +0x148
     int mCooldown[7] = {};      // +0xa8..+0xc0
-    int mRespawn = 0;           // +0x80
+    int mRespawn = 300;         // +0x80 the tank deploys when this runs out
     int mDeaths = 0;            // +0x1c8
     int mDeathX = 0;            // +0x1cc
     bool mGameOver = false;
@@ -185,6 +201,11 @@ private:
     int mShake = 0;             // +0x84 white flash / screen shake
     int mShakeX = 0, mShakeY = 0;
     int mNoNukeMsg = 0;         // +0x1dc
+    bool mDeployed = false;     // +0x326 a tank has been deployed this level
+    int mMile = 0;              // +0x1c4 mile marker sign position (counts down while shown)
+    int mGasName = 0;           // +0x198
+    int mKills = 0, mSpawned = 0, mFriendlyKills = 0;
+    std::vector<BigMessage> mMessages;
     int mFriendlies = 0;        // +0x1bc
     double mScrollSpeed = 1.0;  // +0x188
     double mGasX = 1000.0;      // +0x190 (gas station; >= 1000 means none)
@@ -233,6 +254,9 @@ private:
     void DrawMushrooms();           // 0x428770
     void DrawBeams();
     void UpdateOrbs();              // 0x418770
+    void BossDefeated();            // 0x4138e0 (final stage)
+    void ShowMessage(const std::string& text);
+    void DrawMessages();
     void UpdateTracks();            // 0x4116b0
 
     void FireShell(double power, int sideOffset, int angleOffset);   // 0x410d40

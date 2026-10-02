@@ -20,6 +20,7 @@ static Texture* Img(const char* name) { return TextureManager::Get(name); }
 
 Craft::Craft(Board& board, int t, const char* image) : b(board), type(t) {
     img = Img(image);
+    b.CountCraft(1, 0, 0);
     const CraftDef& def = b.CraftStats(type);
     hp = def.armor;
     points = def.points;
@@ -45,6 +46,7 @@ void Craft::Draw() {
 
 // 0x431330 + 0x431480 + AddScore: the common "destroyed" sequence.
 void Craft::Die() {
+    b.CountCraft(0, 1, friendly ? 1 : 0);
     // 1 in 20 kills drops a supply crate (crates arrive with the power-up port).
     if (Rand() % 20 == 0 && b.CanDropCrate() && y <= 280.0 && x >= -320.0 && x < 320.0) {
         b.DropCrate((int)x, (int)y);
@@ -724,6 +726,11 @@ struct Cruise : Craft {
         mirror = (Rand() & 1) != 0;
         vx = mirror ? -5.0 : 5.0;
         x = mirror ? (double)(W() / 2 + 320) : (double)(-320 - W() / 2);
+        b.CountCraft(-1, 0, 0);   // cruise missiles do not count toward the kill percentage
+    }
+    void Die() override {
+        Craft::Die();
+        b.CountCraft(0, -1, 0);
     }
     void UpdateF() override {
         x += vx;
@@ -782,6 +789,7 @@ struct PupCopter : Craft {
         x = mirror ? 520.0 : -520.0;
         vx = mirror ? -speed : speed;
         b.AddFriendly(1);
+        b.CountCraft(-1, 0, 0);
     }
     ~PupCopter() override { AudioSystem::SetLoop(SND_PUPCOPTER, false); }
     void Update() override {
@@ -808,6 +816,7 @@ struct PupCopter : Craft {
     void Die() override {
         AudioSystem::PlaySoundId(SND_FRIENDLYDIE, b.Pan(x));
         Craft::Die();
+        b.CountCraft(0, -1, 0);
     }
     void Draw() override {
         Craft::Draw();

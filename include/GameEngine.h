@@ -24,6 +24,7 @@ struct LaunchOptions {
     std::string screenshotPath;  // saved after the final frame
     bool stretch = false;
     bool autoFire = false;       // hold the fire button (testing)
+    int startProgress = -1;      // skip ahead: level progress in ticks, or ticks before the end if negative < -1 (testing)
     int armoryLevel = 0;         // give every armory weapon (and spread) this level (testing)
 };
 
@@ -57,6 +58,12 @@ private:
     int mCurrentLevelIndex = 0;
     float mTickAccum = 0.0f;
     int mLevelEndTimer = 0;
+    // Debriefing (0x426e60) values, computed when the level ends.
+    struct Debrief {
+        int score = 0, kills = 0, percent = 0, killBonus = 0, friendlyBonus = 0, survivalBonus = 0, lost = 0;
+        int rank = 0;
+        int timer = 0;
+    } mDebrief;
     int mUpgradePoints = 0;
 
     // Menu & UI State
@@ -76,6 +83,8 @@ private:
     void RenderTitle();
     void RenderMissionSelect();
     void RenderPlaying();
+    void UpdateDebrief();
+    void RenderDebrief();
     void RenderArmory();
     void RenderPaused();
     void RenderGameOver();

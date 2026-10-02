@@ -244,9 +244,23 @@ Texture TextureManager::LoadFromFiles(const std::string& colorPath, const std::s
     tex.width = rgbaSurface->w;
     tex.height = rgbaSurface->h;
 
+    // A file named "_name" with no colour file is a PopCap alpha-only image: its
+    // brightness is the alpha and the colour is white (font sheets such as _Normal.png).
+    size_t slash = colorPath.find_last_of('/');
+    bool maskOnly = colorPath[slash == std::string::npos ? 0 : slash + 1] == '_';
+    if (maskOnly) {
+        uint32_t* px = static_cast<uint32_t*>(rgbaSurface->pixels);
+        for (int i = 0; i < tex.width * tex.height; ++i) {
+            uint32_t r = px[i] & 0xFF;
+            px[i] = 0x00FFFFFFu | (r << 24);
+        }
+        tex.hasAlpha = true;
+    }
+    const std::string mask = maskOnly ? std::string() : maskPath;
+
     // Apply alpha mask if present
-    if (!maskPath.empty() && Vfs::Exists(maskPath)) {
-        std::string resolvedMask = Vfs::Resolve(maskPath);
+    if (!mask.empty() && Vfs::Exists(mask)) {
+        std::string resolvedMask = Vfs::Resolve(mask);
         SDL_Surface* maskSurface = IMG_Load(resolvedMask.c_str());
         if (maskSurface) {
             SDL_Surface* maskRgba = SDL_ConvertSurfaceFormat(maskSurface, SDL_PIXELFORMAT_RGBA32, 0);

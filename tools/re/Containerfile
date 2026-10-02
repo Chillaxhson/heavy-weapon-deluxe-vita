@@ -1,0 +1,4 @@
+# Ghidra headless environment for decompiling the original game executable.
+# Ghidra itself is mounted from the host (see tools/re/decompile.sh).
+FROM registry.fedoraproject.org/fedora:44
+RUN dnf -y install --setopt=install_weak_deps=False java-25-openjdk-devel fontconfig && dnf clean all

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include "GLPlatform.h"
 
 namespace HeavyWeapon {
@@ -13,6 +15,9 @@ struct Texture {
     int cols = 1;
     int rows = 1;
     bool hasAlpha = false;
+    // Per-pixel alpha for collision tests (original 0x42d580: non-zero alpha = solid).
+    // Kept for sprites only, not for backgrounds and full-screen images.
+    std::vector<uint8_t> alpha;
 
     int GetCelWidth() const { return cols > 0 ? (width / cols) : width; }
     int GetCelHeight() const { return rows > 0 ? (height / rows) : height; }
@@ -34,7 +39,7 @@ public:
 
 private:
     static std::unordered_map<std::string, Texture> sTextures;
-    static Texture LoadFromFiles(const std::string& colorPath, const std::string& maskPath, int cols, int rows);
+    static Texture LoadFromFiles(const std::string& colorPath, const std::string& maskPath, int cols, int rows, bool keepAlpha);
 };
 
 } // namespace HeavyWeapon

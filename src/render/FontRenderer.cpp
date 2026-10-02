@@ -45,6 +45,16 @@ bool FontRenderer::LoadFont(const std::string& fontName) {
     font.name = fontName;
     font.texture = tex;
 
+    // LayerSetAscent <layer> <n>; multi-layer fonts list the main layer last.
+    for (size_t pos = textData.find("LayerSetAscent "); pos != std::string::npos;
+         pos = textData.find("LayerSetAscent ", pos + 1)) {
+        size_t end = textData.find(';', pos);
+        std::istringstream line(textData.substr(pos, end - pos));
+        std::string cmd, layer;
+        int value = 0;
+        if (line >> cmd >> layer >> value) font.ascent = value;
+    }
+
     // Parse CharList
     std::vector<char> chars;
     size_t charListPos = textData.find("Define CharList");
@@ -189,6 +199,16 @@ float FontRenderer::GetStringHeight(const std::string& fontName, float scale) {
         return (float)it->second.height * scale;
     }
     return 20.0f * scale;
+}
+
+int FontRenderer::GetAscent(const std::string& fontName) {
+    auto it = sFonts.find(fontName);
+    return it == sFonts.end() ? 0 : it->second.ascent;
+}
+
+void FontRenderer::DrawStringBaseline(const std::string& fontName, const std::string& text, int x, int y,
+                                      const Color4f& color, TextAlign align) {
+    DrawString(fontName, text, (float)x, (float)(y - GetAscent(fontName)), color, 1.0f, align);
 }
 
 void FontRenderer::DrawString(const std::string& fontName, const std::string& text, float x, float y, const Color4f& color, float scale, TextAlign align) {

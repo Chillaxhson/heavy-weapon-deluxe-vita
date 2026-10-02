@@ -50,8 +50,10 @@ bool XmlLoader::LoadCrafts(const std::string& path, std::unordered_map<std::stri
     if (!root) return false;
 
     outCrafts.clear();
+    int nextId = 1;   // order matters: craft.xml says "Do NOT change the order"
     for (XMLElement* elem = root->FirstChildElement("Craft"); elem != nullptr; elem = elem->NextSiblingElement("Craft")) {
         CraftDef craft;
+        craft.id = nextId++;
         const char* name = elem->Attribute("name");
         const char* desc = elem->Attribute("desc");
         const char* arms = elem->Attribute("arms");

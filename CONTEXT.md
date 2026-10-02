@@ -42,15 +42,24 @@
 * **Menus** draw the baked-in art at 0,0. Main-menu hover = the part of `mainglow` around the selected button plus `mainbigbtn` / `mainsmallbtn` (additive rim glows). Button centres and armory socket positions were measured from the art.
 * **Desktop build**: `tools/desktop/hw.sh` (Podman). `build` / `run` / `shot OUT.png --state play --level N --frames N` give a playable Linux window and headless screenshots, so changes can be checked without a Vita. `vpk` builds the Vita package.
 * **Known gaps**:
-  * Gameplay numbers in `Entities.cpp` / `GameEngine.cpp` (speeds, fire rates, spreads, enemy behaviour, spawning, hitboxes) are guesses and do not come from the executable. Next step: decompile them.
-  * HUD slot contents, war-room overlays (`missionN.png`, `maprect`, `mappointer`) and plane scroll speeds are placeholders.
-  * `milemarker.png` is the in-world "ENEMY HQ" sign, not a HUD slider.
+  * The old invented gameplay (`Entities.cpp`) is gone; see section 3 for the decompiled port. The status bar layout and plane positions/speeds are now confirmed from the code.
+  * War-room overlays (`missionN.png`, `maprect`) and the armory/main-menu behaviour are still placeholders.
+  * `milemarker.png` is the in-world "ENEMY HQ" sign shown every 5000 ticks, and `mappointer` is the HUD progress marker on the level's mini-map.
   * `AtomicTank.mo3` does not play on either platform: libxmp cannot decode MO3. Needs libopenmpt or a one-time conversion to OGG.
   * `copterblades.png` is unused by the original; helicopters use `rotors` (7 frames).
 
 ---
 
-## 3. Architecture & Subsystems Implemented
+## 3. Decompilation & Faithful Gameplay Port (step 3, in progress)
+
+* **Tooling** (`tools/re/`, outputs in git-ignored `re/`): `decompile.sh` runs Ghidra 12 headless in Podman over `re/inner_game.exe`; `ExportDecomp.java` writes `re/ghidra-out/decomp.c` + `strings.txt`; `ApplyNames.java` applies `names.txt` and fixes the x87 helpers (`__ftol` takes ST0, `_CIpow` takes ST1/ST0) so float maths survive; `annotate.py` tags image offsets (`app+0x688+4*i`, the 157-entry image table) and sound IDs (92-entry sound table; `App_PlaySound` is app vtable `+0xb8`); `dump_class.py` collects a class's ctor + vtable. Decompiler idiom: `(a < b) != (a == b)` means `a <= b`.
+* **Object model**: the app object holds images, fonts (`app+0x924`, 8 slots), sounds, profile/upgrades (`app+0x968..0x994`: nukes, shield, speed, power, rapid fire, spread, then orbs, homing, laser, rockets, flak, thunderstrike), mission (`+0x960`), lives (`+0x964`), score (`+0x95c`). The `Board` widget (ctor `0x4191d0`, Update `0x41b690`, Draw `0x415530`) runs the level at 100 Hz in world coordinates centred on x=0 (drawn with a +320 translate).
+* **Ported so far** (`src/game/`): Board (tank movement/aim/cannon with the `(n+1)^(2/ln(n+6))` upgrade curve, shells, casings, muzzle flash, explosions + particle system, scrolling at the real per-plane rates, respawn, HUD), all 21 craft types (`Crafts.cpp`), all enemy ordnance (`Hazards.cpp`), random wave selection from `waves.xml`, per-pixel collisions from sprite alpha, shield hits, craters, score popups, megalaser parts + megalaser, power-up helicopter + power-ups, nuke + mushroom cloud + screen shake, laser, homing missiles, rockets, flak, Thunderstrike, defense orbs, tread marks.
+* **Still to port**: level flow (GET READY / level complete / mile signs / gas station), the 10 bosses, ambient animation scheduling (one per plane, rare/nukeable), survival mode, war room + armory + main menu screens, profiles/saves, music (MO3).
+
+---
+
+## 4. Architecture & Subsystems Implemented
 
 * **Platform / Virtual File System (`Vfs`)**:
   * Case-insensitive POSIX file resolver (every path component, since PopCap data uses arbitrary casing such as `frigistan\yetti`).
@@ -86,7 +95,7 @@
 
 ---
 
-## 4. Milestones Achieved
+## 5. Milestones Achieved
 
 - [x] Initialized Git repository tracking `git@github.com:Chillaxhson/heavy-weapon-deluxe-vita.git`.
 - [x] Implemented BYOG (Bring-Your-Own-Game) `.gitignore` protecting commercial assets.
@@ -103,3 +112,4 @@
 - [x] Switched to native 640×480 rendering with display scaling; fixed the background plane layout, case-insensitive asset lookup (background animations now load), cached failed texture loads, PopCap font punctuation, and 100 Hz animation timing.
 - [x] Added a Linux desktop build with headless screenshots (`tools/desktop/hw.sh`).
 - [x] Replaced the hand-written sprite table with all 157 records from the executable.
+- [x] Decompiled the game with Ghidra and replaced the invented gameplay with a faithful port of the tank, all craft, ordnance, supplies and armory weapons.

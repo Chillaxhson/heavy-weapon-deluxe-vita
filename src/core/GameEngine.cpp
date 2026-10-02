@@ -53,9 +53,13 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
     if (opts.startState == "map") {
         mState = STATE_MISSION_SELECT;
     } else if (opts.startState == "play") {
+        if (opts.armoryLevel > 0) {
+            for (int i = UP_ORBS; i <= UP_STATIC; ++i) mApp.up[i] = std::min(opts.armoryLevel, 3);
+            mApp.up[UP_SPREAD] = std::min(opts.armoryLevel, 4);
+        }
         StartLevel(mCurrentLevelIndex);
     } else if (opts.startState == "armory") {
-        mStats.availableUpgradePoints = 3;
+        mUpgradePoints = 3;
         mState = STATE_ARMORY;
     }
 
@@ -103,16 +107,6 @@ void GameEngine::Run() {
 
 void GameEngine::Update(float dt) {
     InputManager::Update();
-    Renderer::UpdateScreenShake(dt);
-
-    if (mNukeFlashAlpha > 0.0f) {
-        mNukeFlashAlpha -= 1.6f * dt;
-        if (mNukeFlashAlpha < 0.0f) mNukeFlashAlpha = 0.0f;
-    }
-
-    if (mMushCloudTimer > 0.0f) {
-        mMushCloudTimer -= dt;
-    }
 
     mMenuGlowAnim += 3.0f * dt;
 
@@ -188,13 +182,13 @@ void GameEngine::UpdateTitle(float dt) {
     switch (mMenuSelection) {
         case MENU_MISSION:
             mCurrentLevelIndex = 0;
-            mStats = PlayerStats();
+            mApp = AppState();
             mState = STATE_MISSION_SELECT;
             break;
         case MENU_SURVIVAL:
             // Survival mode is not implemented yet; start mission 1 as a placeholder.
             mCurrentLevelIndex = 0;
-            mStats = PlayerStats();
+            mApp = AppState();
             StartLevel(0);
             break;
         case MENU_QUIT:
@@ -222,354 +216,123 @@ void GameEngine::UpdateMissionSelect(float dt) {
 
 void GameEngine::StartLevel(int levelIndex) {
     mCurrentLevelIndex = levelIndex;
-    mCurrentWaveIndex = 0;
-    mWaveTimer = 0.0f;
-    mLevelProgress = 0.0f;
-    mSpawnTimer = 0.5f;
-    mBossSpawned = false;
+    mApp.mission = levelIndex;
+    mTickAccum = 0.0f;
+    mLevelEndTimer = 0;
 
-    // Approximate total level scroll distance from wave durations
-    float totalWaveLen = 60.0f;
-    if (mCurrentLevelIndex < (int)mLevels.size()) {
-        totalWaveLen = 0.0f;
-        for (const auto& w : mLevels[mCurrentLevelIndex].waves) {
-            totalWaveLen += (float)w.length;
-        }
-        if (totalWaveLen <= 0.0f) totalWaveLen = 80.0f;
-    }
-    mLevelLength = totalWaveLen * 70.0f; // 70 px/sec scroll speed
-
-    mEnemies.clear();
-    mProjectiles.clear();
-    mExplosions.clear();
-    mCraters.clear();
-    mPowerUps.clear();
-    mParticles.clear();
-
-    mPlayerTank.Init();
-
-    std::string theme = "antagonistan";
-    if (mCurrentLevelIndex < (int)mLevels.size()) {
-        theme = mLevels[mCurrentLevelIndex].bgTheme;
-    }
-
+    const LevelDef* level = (levelIndex < (int)mLevels.size()) ? &mLevels[levelIndex] : nullptr;
+    std::string theme = level ? level->bgTheme : "antagonistan";
     std::vector<AnimDef> anims;
-    if (mCurrentLevelIndex < (int)mLevelAnims.size()) {
-        anims = mLevelAnims[mCurrentLevelIndex];
-    }
-
+    if (levelIndex < (int)mLevelAnims.size()) anims = mLevelAnims[levelIndex];
     WorldRenderer::SetTheme(theme, anims);
 
-    AudioSystem::PlayMusic("Music/AtomicTank.mo3");
-    AudioSystem::PlaySound("v_getready");
-    AudioSystem::PlaySound("airraid");
+    std::vector<CraftDef> byId(mCraftDefs.size() + 1);
+    for (const auto& kv : mCraftDefs) {
+        if (kv.second.id > 0 && kv.second.id < (int)byId.size()) byId[kv.second.id] = kv.second;
+    }
+    mBoard = std::make_unique<Board>(mApp, level, byId, false);
 
+    AudioSystem::PlayMusic("Music/AtomicTank.mo3");
+    AudioSystem::PlaySoundId(SND_V_GETREADY);
     mState = STATE_PLAYING;
 }
 
-void GameEngine::SpawnNextEnemy() {
-    if (mCurrentLevelIndex >= (int)mLevels.size()) return;
-    const LevelDef& level = mLevels[mCurrentLevelIndex];
-    if (mCurrentWaveIndex >= level.waves.size()) return;
+// Feeds input to the board the way the original's mouse handlers do: the cursor is the
+// point the tank drives toward and aims at. Gamepads aim with the right stick and drive
+// with the left stick instead.
+void GameEngine::ApplyBoardInput() {
+    const InputState& input = InputManager::GetState();
+    Board& board = *mBoard;
 
-    const WaveDef& wave = level.waves[mCurrentWaveIndex];
-    if (wave.craftList.empty()) return;
-
-    int idx = rand() % wave.craftList.size();
-    const WaveCraftEntry& entry = wave.craftList[idx];
-
-    auto it = mCraftDefs.find(entry.craftId);
-    if (it == mCraftDefs.end()) return;
-
-    Enemy e;
-    e.def = it->second;
-    e.hp = e.def.armor;
-    e.maxHp = e.def.armor;
-    e.x = SCREEN_WIDTH + 80.0f;
-
-    if (e.def.name == "TRUCK" || e.def.name == "ENEMYTANK" || e.def.name == "DOZER") {
-        e.y = GROUND_Y - 24.0f;
-        e.vx = -85.0f;
+    bool stickAim = std::abs(input.aimAxisX) > 0.0f || std::abs(input.aimAxisY) > 0.0f;
+    if (input.touchDown || (input.pointerAim && !stickAim)) {
+        board.SetTarget((int)input.touchX, (int)input.touchY);
+        board.SetDriveOverride(false, 0.0f);
     } else {
-        // Airborne enemy
-        e.y = 80.0f + (float)(rand() % 230);
-        e.vx = -140.0f - (float)(rand() % 90);
+        // Point the virtual cursor 200px out along the right stick (straight up when idle),
+        // so the original aiming code applies unchanged.
+        float ax = input.aimAxisX, ay = input.aimAxisY;
+        if (!stickAim) { ax = 0.0f; ay = -1.0f; }
+        if (ay > 0.0f) ay = 0.0f;
+        float len = std::sqrt(ax * ax + ay * ay);
+        if (len < 0.001f) { ax = 0.0f; ay = -1.0f; len = 1.0f; }
+        int tx = (int)(board.TankX() + 320.0 + ax / len * 200.0);
+        int ty = (int)(board.TankY() - 12 + ay / len * 200.0);
+        board.SetTarget(tx, ty);
+        board.SetDriveOverride(true, input.moveAxisX);
     }
-
-    mEnemies.push_back(e);
-}
-
-void GameEngine::SpawnExplosion(float x, float y, float size, bool isNuke) {
-    ExplosionInstance exp;
-    exp.x = x;
-    exp.y = y;
-    exp.animFrame = 0.0f;
-    exp.scale = size;
-    exp.isNuke = isNuke;
-    mExplosions.push_back(exp);
-
-    Renderer::AddScreenShake(isNuke ? 30.0f : (10.0f * size), isNuke ? 1.0f : 0.25f);
-    AudioSystem::PlaySound(isNuke ? "nukeblast" : (size > 1.2f ? "bigexplode" : "smallexplode"));
-}
-
-void GameEngine::TriggerNuke() {
-    if (mStats.nukes <= 0) return;
-    mStats.nukes--;
-
-    mNukeFlashAlpha = 1.0f;
-    mMushCloudTimer = 2.5f;
-    mMushCloudX = mPlayerTank.x;
-
-    Renderer::AddScreenShake(30.0f, 1.2f);
-    AudioSystem::PlaySound("nukeblast");
-    AudioSystem::PlaySound("earthquake");
-
-    WorldRenderer::TriggerNuke();
-
-    // Destroy all enemies on screen
-    for (auto& e : mEnemies) {
-        if (e.active) {
-            e.active = false;
-            mStats.score += e.def.points;
-            SpawnExplosion(e.x, e.y, 1.8f);
-        }
-    }
-
-    // Destroy all enemy projectiles
-    for (auto& p : mProjectiles) {
-        if (p.type != PROJ_PLAYER_CANNON && p.type != PROJ_PLAYER_MISSILE && p.type != PROJ_PLAYER_LASER) {
-            p.active = false;
-        }
-    }
+    board.SetFiring(input.fireCannon || input.touchDown || mOpts.autoFire);
+    if (input.fireNukePressed) board.FireNuke();
 }
 
 void GameEngine::UpdatePlaying(float dt) {
     const InputState& input = InputManager::GetState();
-
     if (input.pausePressed) {
-        AudioSystem::UpdateEngineSound(false);
         mState = STATE_PAUSED;
         return;
     }
 
-    if (input.fireNukePressed) {
-        TriggerNuke();
+    // The original logic runs at a fixed 100 Hz; render frames run at the display rate.
+    mTickAccum += dt * POPCAP_TICKS_PER_SEC;
+    if (mTickAccum > 10.0f) mTickAccum = 10.0f;
+    while (mTickAccum >= 1.0f) {
+        mTickAccum -= 1.0f;
+        ApplyBoardInput();
+        mBoard->Update();
+        AudioSystem::Tick();
     }
 
-    if (input.fireMegalaserPressed && mStats.megalaserCharge >= 100) {
-        mStats.megalaserCharge = 0;
-        mPlayerTank.megalaserTimer = 3.0f;
-        AudioSystem::PlaySound("v_megalaser");
-        AudioSystem::PlaySound("bosslaser");
+    if (mBoard->IsGameOver()) {
+        AudioSystem::PlaySoundId(SND_V_GAMEOVER);
+        mState = STATE_GAMEOVER;
+        return;
     }
 
-    // Engine diesel sound loop
-    bool moving = (std::abs(mPlayerTank.vx) > 10.0f);
-    AudioSystem::UpdateEngineSound(moving);
-
-    // Advance world scroll
-    float scrollSpeed = 70.0f;
-    WorldRenderer::Update(dt, scrollSpeed);
-    mLevelProgress += scrollSpeed * dt;
-
-    // Player Tank update
-    mPlayerTank.Update(dt, mStats, mProjectiles);
-
-    // Enemy Spawning
-    mSpawnTimer -= dt;
-    if (mSpawnTimer <= 0.0f) {
-        mSpawnTimer = 0.8f + (float)(rand() % 12) / 10.0f;
-        SpawnNextEnemy();
-    }
-
-    // Wave Progression
-    if (mCurrentLevelIndex < (int)mLevels.size()) {
-        const LevelDef& level = mLevels[mCurrentLevelIndex];
-        mWaveTimer += dt;
-        if (mCurrentWaveIndex < level.waves.size()) {
-            if (mWaveTimer >= (float)level.waves[mCurrentWaveIndex].length) {
-                mWaveTimer = 0.0f;
-                mCurrentWaveIndex++;
-            }
-        } else if (!mBossSpawned && mEnemies.empty()) {
-            // Level complete!
-            AudioSystem::UpdateEngineSound(false);
-            mStats.availableUpgradePoints++;
-            mStats.score += 5000;
-            AudioSystem::PlaySound("v_levelcomplete");
-            AudioSystem::PlaySound("alert");
+    // Placeholder level end until the boss and level-complete screens are ported: once
+    // the level length is reached, move on to the armory after a short pause.
+    if (mBoard->Progress() >= mBoard->Length()) {
+        if (++mLevelEndTimer == 1) AudioSystem::PlaySoundId(SND_V_LEVELCOMPLETE);
+        if (mLevelEndTimer > 180) {
+            mUpgradePoints++;
             mState = STATE_ARMORY;
-            return;
         }
     }
-
-    // Update Enemies
-    for (auto& e : mEnemies) {
-        if (e.active) {
-            e.Update(dt, mPlayerTank.x, mPlayerTank.y, mProjectiles);
-        }
-    }
-
-    // Update Projectiles
-    for (auto& p : mProjectiles) {
-        if (!p.active) continue;
-
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.animFrame += 20.0f * dt;
-        p.life -= dt;
-
-        // Ground bomb impact
-        if ((p.type == PROJ_ENEMY_BOMB || p.type == PROJ_ENEMY_ARMORED_BOMB ||
-             p.type == PROJ_ENEMY_FRAG_BOMB || p.type == PROJ_ENEMY_FATBOY) && p.y >= GROUND_Y - 5.0f) {
-            p.active = false;
-            SpawnExplosion(p.x, GROUND_Y - 10.0f, (p.type == PROJ_ENEMY_FATBOY) ? 2.0f : 1.0f);
-
-            // Ground crater
-            CraterInstance cr;
-            cr.x = p.x;
-            cr.y = GROUND_Y - 5.0f;
-            cr.frame = rand() % 5;
-            mCraters.push_back(cr);
-            continue;
-        }
-
-        if (p.life <= 0.0f || p.x < -60.0f || p.x > SCREEN_WIDTH + 60.0f || p.y < -60.0f || p.y > GROUND_Y + 30.0f) {
-            p.active = false;
-        }
-
-        // Player Projectiles vs Enemies
-        if (p.type == PROJ_PLAYER_CANNON || p.type == PROJ_PLAYER_MISSILE || p.type == PROJ_PLAYER_FLAK || p.type == PROJ_PLAYER_LASER) {
-            for (auto& e : mEnemies) {
-                if (!e.active) continue;
-                Rect hb = e.GetHitbox();
-                if (p.x >= hb.x && p.x <= hb.x + hb.w && p.y >= hb.y && p.y <= hb.y + hb.h) {
-                    e.TakeDamage(p.damage);
-                    p.active = (p.type == PROJ_PLAYER_LASER); // Lasers pierce
-
-                    if (mStats.megalaserCharge < 100) {
-                        mStats.megalaserCharge += 1;
-                    }
-
-                    if (e.hp <= 0) {
-                        e.active = false;
-                        mStats.score += e.def.points;
-                        SpawnExplosion(e.x, e.y, std::clamp(hb.w * 0.02f, 0.8f, 2.2f));
-
-                        // Chance to drop power-up supply
-                        if (rand() % 6 == 0) {
-                            PowerUpItem pup;
-                            pup.x = e.x;
-                            pup.y = e.y;
-                            pup.cel = rand() % 12;
-                            pup.isNuke = (rand() % 8 == 0);
-                            mPowerUps.push_back(pup);
-                        }
-                    } else {
-                        AudioSystem::PlaySound("bullethit", 0.5f);
-                    }
-                    break;
-                }
-            }
-        }
-        // Enemy Projectiles vs Player Tank
-        else {
-            Rect tankHb = mPlayerTank.GetHitbox();
-            if (p.x >= tankHb.x && p.x <= tankHb.x + tankHb.w && p.y >= tankHb.y && p.y <= tankHb.y + tankHb.h) {
-                p.active = false;
-                if (!mPlayerTank.isInvulnerable) {
-                    mPlayerTank.TakeDamage();
-                    SpawnExplosion(p.x, p.y, 1.2f);
-                    mStats.lives--;
-                    if (mStats.lives <= 0) {
-                        AudioSystem::UpdateEngineSound(false);
-                        AudioSystem::PlaySound("v_gameover");
-                        mState = STATE_GAMEOVER;
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    // Update Explosions
-    for (auto& exp : mExplosions) {
-        if (exp.active) {
-            exp.Update(dt);
-        }
-    }
-
-    // Update PowerUps
-    for (auto& pup : mPowerUps) {
-        if (!pup.active) continue;
-        pup.y += pup.vy * dt;
-        if (pup.y >= GROUND_Y - 15.0f) {
-            pup.y = GROUND_Y - 15.0f;
-        }
-
-        // Collect powerup
-        Rect tankHb = mPlayerTank.GetHitbox();
-        if (pup.x >= tankHb.x && pup.x <= tankHb.x + tankHb.w && pup.y >= tankHb.y && pup.y <= tankHb.y + tankHb.h + 20.0f) {
-            pup.active = false;
-            if (pup.isNuke) {
-                if (mStats.nukes < MAX_NUKES) mStats.nukes++;
-                AudioSystem::PlaySound("powerup");
-            } else {
-                mStats.score += 250;
-                AudioSystem::PlaySound("gunpowerup");
-            }
-        }
-    }
-
-    // Cleanup dead entities
-    mEnemies.erase(std::remove_if(mEnemies.begin(), mEnemies.end(), [](const Enemy& e){ return !e.active; }), mEnemies.end());
-    mProjectiles.erase(std::remove_if(mProjectiles.begin(), mProjectiles.end(), [](const Projectile& p){ return !p.active; }), mProjectiles.end());
-    mExplosions.erase(std::remove_if(mExplosions.begin(), mExplosions.end(), [](const ExplosionInstance& exp){ return !exp.active; }), mExplosions.end());
-    mPowerUps.erase(std::remove_if(mPowerUps.begin(), mPowerUps.end(), [](const PowerUpItem& pup){ return !pup.active; }), mPowerUps.end());
 }
 
 void GameEngine::UpdateArmory(float dt) {
     (void)dt;
     const InputState& input = InputManager::GetState();
+    constexpr int kWeapons = UP_STATIC - UP_ORBS + 1;
 
     if (input.upPressed) {
-        mArmorySelection = (mArmorySelection - 1 + WEAPON_COUNT) % WEAPON_COUNT;
-        AudioSystem::PlaySound("stats", 0.5f);
+        mArmorySelection = (mArmorySelection - 1 + kWeapons) % kWeapons;
+        AudioSystem::PlaySoundId(SND_MAPOVER);
     } else if (input.downPressed) {
-        mArmorySelection = (mArmorySelection + 1) % WEAPON_COUNT;
-        AudioSystem::PlaySound("stats", 0.5f);
+        mArmorySelection = (mArmorySelection + 1) % kWeapons;
+        AudioSystem::PlaySoundId(SND_MAPOVER);
     }
 
-    // Upgrade weapon
+    int& level = mApp.up[UP_ORBS + mArmorySelection];
     if (input.rightPressed || input.altFirePressed) {
-        int maxLvl = (mArmorySelection == WEAPON_CANNON) ? 5 : 3;
-        if (mStats.availableUpgradePoints > 0 && mStats.weaponLevels[mArmorySelection] < maxLvl) {
-            mStats.weaponLevels[mArmorySelection]++;
-            mStats.availableUpgradePoints--;
-            AudioSystem::PlaySound("upgrade");
+        if (mUpgradePoints > 0 && level < 3) {
+            ++level;
+            --mUpgradePoints;
+            AudioSystem::PlaySoundId(SND_UPGRADE);
         } else {
-            AudioSystem::PlaySound("denied", 0.5f);
+            AudioSystem::PlaySoundId(SND_DENIED);
         }
-    }
-    // Downgrade weapon
-    else if (input.leftPressed) {
-        int minLvl = (mArmorySelection == WEAPON_CANNON) ? 1 : 0;
-        if (mStats.weaponLevels[mArmorySelection] > minLvl) {
-            mStats.weaponLevels[mArmorySelection]--;
-            mStats.availableUpgradePoints++;
-            AudioSystem::PlaySound("buttonup");
+    } else if (input.leftPressed) {
+        if (level > 0) {
+            --level;
+            ++mUpgradePoints;
+            AudioSystem::PlaySoundId(SND_BUTTONUP);
         }
     }
 
-    // Advance to next mission
-    if (input.confirmPressed || input.pausePressed) {
-        AudioSystem::PlaySound("buttondown");
+    if (input.confirmPressed) {
+        AudioSystem::PlaySoundId(SND_BUTTONDOWN);
         mCurrentLevelIndex++;
-        if (mCurrentLevelIndex >= NUM_CAMPAIGN_MISSIONS) {
-            mState = STATE_TITLE; // Victory!
-        } else {
-            mState = STATE_MISSION_SELECT;
-        }
+        mState = (mCurrentLevelIndex >= NUM_CAMPAIGN_MISSIONS) ? STATE_TITLE : STATE_MISSION_SELECT;
     }
 }
 
@@ -588,7 +351,7 @@ void GameEngine::UpdateGameOver(float dt) {
     (void)dt;
     const InputState& input = InputManager::GetState();
     if (input.confirmPressed || input.pausePressed || input.touchPressed) {
-        mStats = PlayerStats();
+        mApp = AppState();
         mState = STATE_TITLE;
         AudioSystem::PlayMusic("Music/LoveTheme.ogg");
     }
@@ -683,98 +446,7 @@ void GameEngine::RenderMissionSelect() {
 }
 
 void GameEngine::RenderPlaying() {
-    // Parallax background
-    WorldRenderer::Render();
-
-    // Ground craters (crater.png, 5 frames)
-    Texture* craterTex = TextureManager::Get("crater");
-    if (craterTex) {
-        for (const auto& cr : mCraters) {
-            Renderer::DrawCel(craterTex, cr.frame % 5, 0, cr.x, cr.y, true);
-        }
-    }
-
-    // PowerUp supply crates
-    for (const auto& pup : mPowerUps) {
-        pup.Render();
-    }
-
-    // Player Tank (authentic multi-layer)
-    mPlayerTank.Render(mStats);
-
-    // Enemies (authentic rotor animations, shadows, prop frames)
-    for (const auto& e : mEnemies) {
-        if (e.active) {
-            e.Render();
-        }
-    }
-
-    // Projectiles
-    for (const auto& p : mProjectiles) {
-        p.Render();
-    }
-
-    // Explosions (authentic PopCap 20-frame high-res sheet)
-    for (const auto& exp : mExplosions) {
-        exp.Render();
-    }
-
-    // Nuke Mushroom Cloud (mushsmoke.png, mushfire.jpg)
-    if (mMushCloudTimer > 0.0f) {
-        Texture* smokeTex = TextureManager::Get("mushsmoke");
-        Texture* fireTex = TextureManager::Get("mushfire");
-        float cloudProgress = 1.0f - (mMushCloudTimer / 2.5f);
-        float cloudY = GROUND_Y - cloudProgress * 300.0f;
-        float cloudScale = 1.0f + cloudProgress * 1.5f;
-
-        if (smokeTex) {
-            int frame = ((int)(cloudProgress * 3.0f)) % 3;
-            Renderer::DrawCel(smokeTex, frame, 0, mMushCloudX, cloudY, true, cloudScale, cloudScale);
-        }
-        if (fireTex && cloudProgress < 0.6f) {
-            Renderer::SetAdditiveBlend(true);
-            int fFrame = ((int)(cloudProgress * 5.0f)) % 3;
-            Renderer::DrawCel(fireTex, fFrame, 0, mMushCloudX, cloudY + 40.0f, true, cloudScale, cloudScale);
-            Renderer::SetAdditiveBlend(false);
-        }
-    }
-
-    // Nuke Screen Flash
-    if (mNukeFlashAlpha > 0.0f) {
-        Renderer::DrawFillRect(0.0f, 0.0f, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT, { 1.0f, 1.0f, 1.0f, mNukeFlashAlpha });
-    }
-
-    // In-game HUD
-    RenderHUD();
-}
-
-void GameEngine::RenderHUD() {
-    // Status bar along the top of the screen. The contents of each slot are provisional
-    // until the original HUD draw code is decompiled.
-    Renderer::DrawTexture(TextureManager::Get("statusbar"), 0.0f, STATUSBAR_Y);
-
-    Texture* tankIcon = TextureManager::Get("tankicon");
-    for (int i = 0; i < mStats.lives && tankIcon; ++i) {
-        Renderer::DrawTexture(tankIcon, 8.0f + (float)i * 21.0f, STATUSBAR_Y + 7.0f);
-    }
-
-    Texture* nukeIcon = TextureManager::Get("nukeicon");
-    for (int i = 0; i < mStats.nukes && nukeIcon; ++i) {
-        Renderer::DrawCel(nukeIcon, 0, 0, 125.0f + (float)i * 16.0f, STATUSBAR_Y + 15.0f, true, 0.6f, 0.6f);
-    }
-
-    FontRenderer::DrawString("Normal", std::to_string(mStats.score), 330.0f, STATUSBAR_Y + 7.0f,
-                             Color4f::White(), 1.0f, ALIGN_RIGHT);
-
-    // Megalaser charge
-    Texture* meterTex = TextureManager::Get("megameter");
-    float meterX = 437.0f, meterY = STATUSBAR_Y + 6.0f;
-    if (meterTex) {
-        float frac = std::clamp((float)mStats.megalaserCharge / 100.0f, 0.0f, 1.0f);
-        Rect src = { 0.0f, 0.0f, (float)meterTex->width * frac, (float)meterTex->height };
-        Rect dst = { meterX, meterY, src.w, src.h };
-        Renderer::DrawTexture(meterTex, dst, src);
-    }
+    if (mBoard) mBoard->Draw();
 }
 
 void GameEngine::RenderArmory() {
@@ -796,7 +468,7 @@ void GameEngine::RenderArmory() {
             Renderer::DrawCel(upgradesTex, i, 0, socketX(i), cy, true);
         }
         if (lvlTex) {
-            int lvl = std::clamp(mStats.weaponLevels[i], 0, lvlTex->cols - 1);
+            int lvl = std::clamp(mApp.up[UP_ORBS + i], 0, lvlTex->cols - 1);
             Renderer::DrawCel(lvlTex, lvl, 0, levelX(i), cy, true);
         }
         if (mArmorySelection == i && btnTex) {
@@ -810,12 +482,13 @@ void GameEngine::RenderArmory() {
     }
 
     // Central screen: selected weapon and remaining points.
+    // Names from the executable's weapon table, in armory slot order.
     const char* weaponNames[WEAPON_COUNT] = {
-        "HEAVY CANNON", "DEFENSE ORBS", "HOMING MISSILES", "LASER CANNON", "FLAK SHELLS", "THUNDERSTRIKE"
+        "DEFENSE ORBS", "HOMING MISSILE", "LASER", "ROCKETS", "FLAK CANNON", "THUNDERSTRIKE"
     };
     FontRenderer::DrawString("Normal", weaponNames[mArmorySelection], 316.0f, 110.0f,
                              { 0.6f, 1.0f, 0.6f, 1.0f }, 1.0f, ALIGN_CENTER);
-    FontRenderer::DrawString("Normal", "POINTS: " + std::to_string(mStats.availableUpgradePoints), 316.0f, 140.0f,
+    FontRenderer::DrawString("Normal", "POINTS: " + std::to_string(mUpgradePoints), 316.0f, 140.0f,
                              { 0.6f, 1.0f, 0.6f, 1.0f }, 1.0f, ALIGN_CENTER);
 
     Texture* advanceTex = TextureManager::Get("advancebtn");
@@ -838,7 +511,7 @@ void GameEngine::RenderGameOver() {
     Renderer::DrawFillRect(0.0f, 0.0f, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT, { 0.3f, 0.04f, 0.04f, 0.82f });
     FontRenderer::DrawString("RubberStampLET42", "MISSION FAILED", SCREEN_WIDTH * 0.5f, 190.0f, { 1.0f, 0.2f, 0.2f, 1.0f }, 1.0f, ALIGN_CENTER);
 
-    std::string scoreStr = "FINAL SCORE: " + std::to_string(mStats.score);
+    std::string scoreStr = "FINAL SCORE: " + std::to_string(mApp.score);
     FontRenderer::DrawString("Normal", scoreStr, SCREEN_WIDTH * 0.5f, 275.0f, { 1.0f, 1.0f, 1.0f, 1.0f }, 1.2f, ALIGN_CENTER);
 
     FontRenderer::DrawString("Computer", "PRESS CROSS TO RETURN TO HEADQUARTERS", SCREEN_WIDTH * 0.5f, 370.0f, { 1.0f, 0.9f, 0.2f, 1.0f }, 1.0f, ALIGN_CENTER);

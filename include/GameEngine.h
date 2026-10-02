@@ -2,7 +2,9 @@
 
 #include "Constants.h"
 #include "DataModels.h"
-#include "Entities.h"
+#include "game/AppState.h"
+#include "game/Board.h"
+#include <memory>
 #include "XmlLoader.h"
 #include "WorldRenderer.h"
 #include "FontRenderer.h"
@@ -21,6 +23,8 @@ struct LaunchOptions {
     int maxFrames = -1;          // > 0: run exactly this many fixed-timestep frames, then quit
     std::string screenshotPath;  // saved after the final frame
     bool stretch = false;
+    bool autoFire = false;       // hold the fire button (testing)
+    int armoryLevel = 0;         // give every armory weapon (and spread) this level (testing)
 };
 
 class GameEngine {
@@ -48,34 +52,17 @@ private:
     std::vector<std::vector<AnimDef>> mLevelAnims;
 
     // Runtime state
-    PlayerStats mStats;
-    PlayerTank mPlayerTank;
-    std::vector<Enemy> mEnemies;
-    std::vector<Projectile> mProjectiles;
-    std::vector<ExplosionInstance> mExplosions;
-    std::vector<CraterInstance> mCraters;
-    std::vector<PowerUpItem> mPowerUps;
-    std::vector<Particle> mParticles;
-
-    // Wave spawning state
+    AppState mApp;
+    std::unique_ptr<Board> mBoard;
     int mCurrentLevelIndex = 0;
-    size_t mCurrentWaveIndex = 0;
-    float mWaveTimer = 0.0f;
-    float mLevelProgress = 0.0f;
-    float mLevelLength = 1000.0f;
-    float mSpawnTimer = 0.0f;
-    bool mBossSpawned = false;
+    float mTickAccum = 0.0f;
+    int mLevelEndTimer = 0;
+    int mUpgradePoints = 0;
 
     // Menu & UI State
     int mMenuSelection = 0;
     int mArmorySelection = 0;
     float mMenuGlowAnim = 0.0f;
-    float mDieselSoundTimer = 0.0f;
-
-    // FX State
-    float mNukeFlashAlpha = 0.0f;
-    float mMushCloudTimer = 0.0f;
-    float mMushCloudX = 480.0f;
 
     // Internal state updates
     void UpdateTitle(float dt);
@@ -89,16 +76,12 @@ private:
     void RenderTitle();
     void RenderMissionSelect();
     void RenderPlaying();
-    void RenderHUD();
     void RenderArmory();
     void RenderPaused();
     void RenderGameOver();
 
-    // Spawning & Combat helpers
     void StartLevel(int levelIndex);
-    void SpawnNextEnemy();
-    void TriggerNuke();
-    void SpawnExplosion(float x, float y, float size = 1.0f, bool isNuke = false);
+    void ApplyBoardInput();
 };
 
 } // namespace HeavyWeapon

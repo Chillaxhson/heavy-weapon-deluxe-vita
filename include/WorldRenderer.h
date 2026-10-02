@@ -11,8 +11,16 @@ class WorldRenderer {
 public:
     static void Init();
     static void SetTheme(const std::string& themeName, const std::vector<AnimDef>& levelAnims);
-    static void Update(float dt, float scrollSpeed);
-    static void Render();
+    // One 100 Hz tick; groundScroll is how far the ground plane moved (pixels).
+    static void Tick(float groundScroll);
+    // Ambient Anims.xml animations of one plane (1 ground .. 4 sky), screen space.
+    static void RenderAnims(int plane);
+
+    static Texture* Sky() { return sSkyTex; }
+    static Texture* Bg() { return sBgTex; }
+    static Texture* Bg2() { return sBg2Tex; }
+    static Texture* Ground() { return sGroundTex; }
+    static Texture* MiniMap() { return sMapTex; }   // 138x18 HUD progress map
 
     // Trigger nuke effect across world animations
     static void TriggerNuke();
@@ -28,11 +36,11 @@ private:
     static Texture* sBg2Tex; // Far BG
     static Texture* sBgTex;  // Mid BG
     static Texture* sGroundTex;
+    static Texture* sMapTex;
 
     // Active ambient animations
     static std::vector<ActiveAnim> sAnims;
 
-    static void RenderPlane(Texture* tex, float scrollFactor, float yOffset, float planeH);
 };
 
 } // namespace HeavyWeapon

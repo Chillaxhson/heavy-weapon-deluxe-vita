@@ -18,6 +18,8 @@ static void PrintUsage() {
         "  --frames <n>                     quit after n frames (fixed 60 Hz timestep)\n"
         "  --screenshot <file.png>          save the final 640x480 frame (needs --frames)\n"
         "  --stretch                        fill the window instead of keeping 4:3\n"
+        "  --autofire                       hold the fire button (testing)\n"
+        "  --armory <n>                     all armory weapons and spread at level n (testing)\n"
         "  --scale <n>                      initial window size as a multiple of 640x480\n";
 }
 
@@ -30,6 +32,8 @@ static bool ParseArgs(int argc, char* argv[], HeavyWeapon::LaunchOptions& opts, 
         else if (a == "--frames" && hasValue) opts.maxFrames = std::atoi(argv[++i]);
         else if (a == "--screenshot" && hasValue) opts.screenshotPath = argv[++i];
         else if (a == "--stretch") opts.stretch = true;
+        else if (a == "--autofire") opts.autoFire = true;
+        else if (a == "--armory" && hasValue) opts.armoryLevel = std::atoi(argv[++i]);
         else if (a == "--scale" && hasValue) windowScale = std::max(1, std::atoi(argv[++i]));
         else if (a == "--help" || a == "-h") { PrintUsage(); return false; }
         else { std::cerr << "Unknown argument: " << a << "\n"; PrintUsage(); return false; }

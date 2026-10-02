@@ -23,7 +23,7 @@ run_in() {
 }
 
 run_as_root() {
-    podman run --rm --security-opt label=disable -v "$REPO:/src" -w /src "$@"
+    podman run --rm --security-opt label=disable -e HOME=/tmp -v "$REPO:/src" -w /src "$@"
 }
 
 cmd="${1:-}"

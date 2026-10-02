@@ -224,8 +224,10 @@ void TextureManager::GetCelInfo(const std::string& name, int& outCols, int& outR
     outRows = 1;
 }
 
-Texture TextureManager::LoadFromFiles(const std::string& colorPath, const std::string& maskPath, int cols, int rows) {
-    Texture tex = { 0, 0, 0, cols, rows, false };
+Texture TextureManager::LoadFromFiles(const std::string& colorPath, const std::string& maskPath, int cols, int rows, bool keepAlpha) {
+    Texture tex;
+    tex.cols = cols;
+    tex.rows = rows;
 
     SDL_Surface* srcSurface = IMG_Load(colorPath.c_str());
     if (!srcSurface) {
@@ -267,7 +269,13 @@ Texture TextureManager::LoadFromFiles(const std::string& colorPath, const std::s
         tex.hasAlpha = true; // standard PNG already has alpha
     }
 
-    // Upload to VitaGL
+    if (keepAlpha && !(tex.width >= 640 && tex.height >= 480)) {
+        const uint8_t* px = static_cast<const uint8_t*>(rgbaSurface->pixels);
+        tex.alpha.resize((size_t)tex.width * tex.height);
+        for (size_t i = 0; i < tex.alpha.size(); ++i) tex.alpha[i] = px[i * 4 + 3];
+    }
+
+    // Upload to the GPU
     glGenTextures(1, &tex.id);
     glBindTexture(GL_TEXTURE_2D, tex.id);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -348,7 +356,8 @@ Texture* TextureManager::Load(const std::string& relativePath) {
         return nullptr;
     }
 
-    Texture tex = LoadFromFiles(Vfs::Resolve(colorPath), maskPath, cols, rows);
+    bool keepAlpha = key.rfind("backgrounds/", 0) != 0;
+    Texture tex = LoadFromFiles(Vfs::Resolve(colorPath), maskPath, cols, rows, keepAlpha);
     sTextures[key] = tex;
     return tex.id ? &sTextures[key] : nullptr;
 }

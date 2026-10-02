@@ -18,8 +18,13 @@ set(SOURCES
     src/render/Renderer.cpp
     src/render/FontRenderer.cpp
     src/render/WorldRenderer.cpp
-    src/core/Entities.cpp
     src/core/GameEngine.cpp
+    src/game/Gfx.cpp
+    src/game/Board.cpp
+    src/game/Crafts.cpp
+    src/game/Hazards.cpp
+    src/game/Supplies.cpp
+    src/game/Weapons.cpp
 )
 
 # ---------------------------------------------------------------------------

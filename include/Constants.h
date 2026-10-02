@@ -44,12 +44,13 @@ constexpr int INITIAL_NUKES = 1;
 constexpr int MAX_NUKES = 3;
 constexpr int NUM_CAMPAIGN_MISSIONS = 19;
 
-// Weapon upgrade indices
+// Armory weapons, in the order of the armory slots and upgrades.png
+// (app +0x980..+0x994 in the original; see UpgradeSlot in game/AppState.h).
 enum WeaponType {
-    WEAPON_CANNON = 0,
-    WEAPON_DEFENSE_ORBS,
-    WEAPON_HOMING_MISSILES,
+    WEAPON_ORBS = 0,
+    WEAPON_HOMING,
     WEAPON_LASER,
+    WEAPON_ROCKETS,
     WEAPON_FLAK,
     WEAPON_THUNDERSTRIKE,
     WEAPON_COUNT

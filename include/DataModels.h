@@ -9,6 +9,7 @@ namespace HeavyWeapon {
 
 // Craft definition from craft.xml
 struct CraftDef {
+    int id = 0;          // 1-based position in craft.xml; the original's craft type ID
     std::string name;
     std::string desc;
     std::string arms;
@@ -100,17 +101,6 @@ struct ActiveAnim {
     float y = 0.0f;
     bool nuked = false;
     bool visible = true;
-};
-
-// Player Armory & Upgrades
-struct PlayerStats {
-    int score = 0;
-    int lives = INITIAL_LIVES;
-    int nukes = INITIAL_NUKES;
-    int currentMission = 1;
-    int weaponLevels[WEAPON_COUNT] = { 1, 0, 0, 0, 0, 0 }; // Cannon starts at 1
-    int megalaserCharge = 0; // 0 to 100
-    int availableUpgradePoints = 0;
 };
 
 } // namespace HeavyWeapon

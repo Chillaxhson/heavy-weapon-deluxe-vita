@@ -873,7 +873,7 @@ void Board::SpawnCraft(int type) {
 
 // Tank destroyed (0x41a880).
 void Board::KillTank() {
-    if (mRespawn != 0) return;
+    if (mRespawn != 0 || mGod) return;
     mRespawn = 400;
     ++mDeaths;
     mDeathX = (int)mTankX;

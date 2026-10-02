@@ -459,6 +459,210 @@ struct Rainer : Craft {
     }
 };
 
+// ---------------------------------------------------------------------------------
+// War Wrecker (0x447210): a crane truck that rolls in from the right and swings a
+// wrecking ball on a chain. The tower is the hit box.
+// ---------------------------------------------------------------------------------
+
+// Boulder (0x447e00) thrown up when the ball smashes into the ground.
+struct Boulder : Hazard {
+    bool dim;
+    Boulder(Board& bd, double x_, double y_, double vx_, double vy_, bool dim_)
+        : Hazard(bd, "boulder", x_, y_, vx_, vy_, false), dim(dim_) {
+        frame = (double)(Rand() % 5);
+        hp = 20.0;
+        points = 0;
+    }
+    void Update() override {
+        x += vx;
+        y += vy;
+        if (vy < 2.0) vy += 0.05;
+        if (OffScreenX()) { Remove(); return; }
+        if (y > 460.0) {
+            b.SpawnExplosion(x, y, 90, 90, 0.0, -1.0);
+            RemoveWithCrater();
+            return;
+        }
+        if (!b.TankDead() && b.HitsTank(img, (int)x, (int)y, (int)frame, 0, mirror)) {
+            b.SpawnExplosion(x, y, 90, 90, 0.0, -1.0);
+            b.KillTank();
+            Remove();
+            return;
+        }
+        BaseUpdate();
+    }
+    void Draw() override {
+        if (dim) {
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(128, 128 - flash / 2, 128 - flash / 2);
+        } else if (flash != 0) {
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(255, 255 - flash, 255 - flash);
+        }
+        Gfx::DrawSprite(img, (int)x, (int)y, true, (int)frame, 0, mirror);
+        Gfx::SetColorizeImages(false);
+    }
+};
+
+struct Wrecker : Craft {
+    Texture *body, *wheel, *link, *ball, *shadow;
+    double truckX = 640.0, truckV = -1.0, wheelFrame = 0.0;   // +0x90 +0x98 +0x88
+    double swingA = 1.5708, swingB = 1.5708;                   // +0xa0 +0xa8
+    double ballX = 0.0, ballY = 250.0, ballVx = 0.0, ballVy = 0.0; // +0xb0..+0xc8
+    double chain = 200.0;                                      // +0xf0
+    int maxChain;                                              // +0x10c
+    bool entered = false, landed = false;                      // +0x48 +0xf8
+    bool winch = false;                                        // +0x104
+    bool loose = false;                                        // +0x108 ball cut free on death
+    double lx = 0, ly = 0, lvx = 0, lvy = 0;
+    Wrecker(Board& bd) : Craft(bd, 0, "pupcopter") {
+        img = Grid("Images/wrecker/tower", 1);
+        body = Grid("Images/wrecker/body", 1);
+        wheel = Grid("Images/wrecker/wheel", 12);
+        link = Grid("Images/wrecker/link", 1);
+        ball = Grid("Images/wrecker/ball", 1);
+        shadow = Grid("Images/wrecker/shadow", 1);
+        const BossLevelDef* st = Stats(b, "Wrecker");
+        hp = maxHp = st ? st->armor : 2500;
+        points = st ? st->score : 40000;
+        maxChain = (st && st->longChain) ? 0x170 : 0x160;
+        boss = true;
+        persistent = true;
+        x = 0.0;
+        y = 190.0;
+        vx = vy = 0.0;
+    }
+    ~Wrecker() override {
+        AudioSystem::SetLoop(SND_DIESEL, false);
+        AudioSystem::SetLoop(SND_CHAIN, false);
+    }
+    void SetWinch(bool on) {
+        if (on != winch) AudioSystem::SetLoop(SND_CHAIN, on, b.Pan(x));
+        winch = on;
+    }
+    void UpdateF() override {}
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Update();
+        if (loose) {
+            lx += lvx;
+            ly += lvy;
+            lvy += 0.1;
+            chain = std::max(chain - 2.0, 0.0);
+        }
+        if (!b.BossDying()) {
+            swingA += 0.005;
+            swingB += 0.015;
+        }
+        if (!entered) {
+            truckX += truckV;
+            wheelFrame -= truckV * -0.4;
+            if (wheelFrame < 0.0) wheelFrame += 12.0;
+            if (wheelFrame >= 12.0) wheelFrame -= 12.0;
+            AudioSystem::SetLoop(SND_DIESEL, true, b.Pan(truckX));
+            if (truckX < 20.0) {
+                truckV = truckX * -0.05;
+                if (truckX < 0.5) {
+                    entered = true;
+                    AudioSystem::SetLoop(SND_DIESEL, false);
+                }
+            }
+        }
+        if (swingA >= 6.28318) swingA -= 6.28318;
+        if (swingB >= 6.28318) swingB -= 6.28318;
+        x = (std::cos(swingA) + std::cos(swingB)) * 100.0 + truckX;
+
+        // Pendulum: integrate, then pull the ball back onto the chain's length.
+        ballX += ballVx;
+        ballY += ballVy + 0.5;
+        double dx = ballX - x, dy = ballY - 50.0;
+        double k = chain / std::sqrt(dx * dx + dy * dy);
+        ballX = dx * k + x;
+        ballY = dy * k + 50.0;
+        ballVx += (x - ballX) * 0.00025;
+        ballVy = ((chain + 50.0) - ballY) * 0.01;
+
+        if (!b.BossDying() && !b.TankDead() && b.HitsTank(ball, (int)ballX, (int)ballY, 0, 0, false)) b.KillTank();
+        if (b.BossDying()) return;
+
+        // On the long chain (mission 13) the ball smashes the ground and throws boulders.
+        if (ballY >= 410.0) {
+            if ((double)maxChain == chain && b.App().mission == 12 && !landed) {
+                for (int i = 0; i < 10; ++i) {
+                    double bvy = (double)(Rand() % 200) * 0.01 - 5.0;
+                    double bvx = ballVx * 0.25 + (double)(Rand() % 600) * 0.01 - 3.0;
+                    double bx = (double)(Rand() % 80) + ballX - 40.0;
+                    b.AddHazard(std::make_unique<Boulder>(b, bx, 460.0, bvx, bvy, true));
+                }
+                b.SpawnParticles(TextureManager::Get("sanddust"), ballX, 460.0, ballVx * 0.25, -1.0, 20, 2.0, -0.01, -0.5, 200, true, -1);
+                b.SpawnParticles(TextureManager::Get("rock"), ballX, 460.0, ballVx * 0.25, -2.0, 10, 1.0, 0.05, 3.0, 200, false, -1);
+                landed = true;
+                b.Shake(128);
+                AudioSystem::PlaySoundId(SND_BIGEXPLODE, b.Pan(ballX));
+            }
+        } else {
+            landed = false;
+        }
+
+        // Lower the ball while the tank is in play; wind it back up otherwise.
+        if (!b.TankDead() && entered) {
+            if (chain < maxChain) {
+                chain += 0.5;
+                SetWinch(true);
+            } else {
+                SetWinch(false);
+            }
+        } else if (b.App().lives >= 1) {
+            if (chain > 200.0) {
+                chain -= 0.5;
+                SetWinch(true);
+            } else {
+                SetWinch(false);
+            }
+        }
+    }
+    void Draw() override {
+        if (b.Progress() < b.Length()) return;
+        if (flash != 0) {
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(255, 255 - flash, 255 - flash);
+        }
+        Gfx::DrawSprite(body, (int)truckX, (int)(y + 181.0), true);
+        Gfx::DrawSprite(img, (int)x, (int)y, true);
+        int a = (int)(ballY - 200.0);
+        if (a > 0) {
+            Gfx::SetColorizeImages(true);
+            Gfx::SetColor(255, 255, 255, std::min(a, 255));
+            Gfx::DrawSprite(shadow, (int)ballX, 465, true);
+            Gfx::SetColorizeImages(false);
+            if (flash != 0) {
+                Gfx::SetColorizeImages(true);
+                Gfx::SetColor(255, 255 - flash, 255 - flash);
+            }
+        }
+        for (double off : { -215.0, 215.0, -133.0, 133.0 })
+            Gfx::DrawSprite(wheel, (int)(truckX + off), (int)(y + 225.0), true, (int)wheelFrame);
+        Gfx::SetColorizeImages(false);
+        // Chain links from the ball back up to the pulley at (x, 50).
+        double t = std::atan2(ballX - x, ballY - 50.0);
+        double sx = std::cos(t - 1.570795) * 16.0, sy = std::sin(t - 1.570795) * 16.0;
+        for (double cx = ballX, cy = ballY; cy > 48.0; cx -= sx, cy += sy)
+            Gfx::DrawSprite(link, (int)cx, (int)cy, true);
+        Gfx::DrawSprite(ball, (int)(loose ? lx : ballX), (int)(loose ? ly : ballY), true);
+        Gfx::SetColor(0xc0, 0xc0, 0xc0);
+        Gfx::FillRect((int)(x - 12.0), 35, 24, 10);
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+        loose = true;
+        lx = ballX; ly = ballY; lvx = ballVx; lvy = ballVy;
+        SetWinch(false);
+    }
+};
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
@@ -467,6 +671,7 @@ std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
         case 0: return std::make_unique<BossCopter>(b);
         case 1: return std::make_unique<Battleship>(b);
         case 2: return std::make_unique<Rainer>(b);
+        case 3: return std::make_unique<Wrecker>(b);
         default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
     }
 }

@@ -19,6 +19,7 @@ static void PrintUsage() {
         "  --screenshot <file.png>          save the final 640x480 frame (needs --frames)\n"
         "  --stretch                        fill the window instead of keeping 4:3\n"
         "  --autofire                       hold the fire button (testing)\n"
+        "  --god                            the tank cannot be destroyed (testing)\n"
         "  --armory <n>                     all armory weapons and spread at level n (testing)\n"
         "  --progress <n>                   start the level at progress n (n < 0: that many ticks before the end)\n"
         "  --scale <n>                      initial window size as a multiple of 640x480\n";
@@ -34,6 +35,7 @@ static bool ParseArgs(int argc, char* argv[], HeavyWeapon::LaunchOptions& opts, 
         else if (a == "--screenshot" && hasValue) opts.screenshotPath = argv[++i];
         else if (a == "--stretch") opts.stretch = true;
         else if (a == "--autofire") opts.autoFire = true;
+        else if (a == "--god") opts.god = true;
         else if (a == "--armory" && hasValue) opts.armoryLevel = std::atoi(argv[++i]);
         else if (a == "--progress" && hasValue) opts.startProgress = std::atoi(argv[++i]);
         else if (a == "--scale" && hasValue) windowScale = std::max(1, std::atoi(argv[++i]));

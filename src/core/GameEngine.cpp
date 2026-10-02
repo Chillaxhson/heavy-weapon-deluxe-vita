@@ -268,6 +268,7 @@ void GameEngine::ApplyBoardInput() {
         board.SetDriveOverride(true, input.moveAxisX);
     }
     board.SetFiring(input.fireCannon || input.touchDown || mOpts.autoFire);
+    board.SetGodMode(mOpts.god);
     if (input.fireNukePressed) board.FireNuke();
 }
 

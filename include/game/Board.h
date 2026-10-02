@@ -90,6 +90,8 @@ public:
     void AddScore(int points, int x, int y);                                  // 0x417230
     void FireEnemyShot(int x, int y, double angle, double speed);             // 0x411850
     void AddHazard(std::unique_ptr<Hazard> h);
+    void SetGodMode(bool on) { mGod = on; }
+    void Shake(int amount) { mShake = std::max(mShake, amount); }
     void SetNukeFlash(double v) { mNukeFlash = v; }
     void SetEdgeBlock(bool left, bool right) { mBlockLeft = left; mBlockRight = right; }
     void SetDozerPresent(bool on) { mDozerPresent = on; }
@@ -184,6 +186,7 @@ private:
     double mCycle = 0.0;        // +0x140
     double mShieldFlash = 0.0;  // +0x148
     int mCooldown[7] = {};      // +0xa8..+0xc0
+    bool mGod = false;          // testing: KillTank does nothing
     int mRespawn = 300;         // +0x80 the tank deploys when this runs out
     int mDeaths = 0;            // +0x1c8
     int mDeathX = 0;            // +0x1cc

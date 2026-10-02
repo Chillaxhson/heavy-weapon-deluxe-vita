@@ -24,6 +24,7 @@ struct LaunchOptions {
     std::string screenshotPath;  // saved after the final frame
     bool stretch = false;
     bool autoFire = false;       // hold the fire button (testing)
+    bool god = false;            // the tank cannot be destroyed (testing)
     int startProgress = -1;      // skip ahead: level progress in ticks, or ticks before the end if negative < -1 (testing)
     int armoryLevel = 0;         // give every armory weapon (and spread) this level (testing)
 };

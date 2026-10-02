@@ -229,6 +229,7 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
                 dishElem->QueryIntAttribute("up", &bLevel.dishUp);
                 dishElem->QueryIntAttribute("meteors", &bLevel.dishMeteors);
             }
+            if (const char* lc = lvlElem->Attribute("longchain")) bLevel.longChain = std::string(lc) == "yes";
 
             boss.levels.push_back(bLevel);
         }

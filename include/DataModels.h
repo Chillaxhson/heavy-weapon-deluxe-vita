@@ -41,6 +41,7 @@ struct BossLevelDef {
     int dishDown = 800;
     int dishUp = 400;
     int dishMeteors = 15;
+    bool longChain = false;     // Wrecker
 };
 
 struct BossDef {

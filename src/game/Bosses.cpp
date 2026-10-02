@@ -1076,6 +1076,140 @@ void EyeHand::Die() {
     eye.HandLost(index);
 }
 
+// ---------------------------------------------------------------------------------
+// Bustczar (0x43f310): a giant head that rests at one side firing homing missiles, then
+// charges across the screen carpet-bombing.
+// ---------------------------------------------------------------------------------
+
+// Head missile (0x448750): a slower homing missile that locks its heading once aimed.
+struct HeadMissile : Hazard {
+    double turn;            // +0x70
+    bool locked = false;    // +0x68
+    HeadMissile(Board& bd, double x_, double y_, bool mirror_) : Hazard(bd, "headmissile", x_, y_, 0, 0, false) {
+        hp = 20.0;
+        points = 50;
+        turn = (double)(Rand() % 150) * 0.001 + 0.05;
+        frame = mirror_ ? 3.0 : 17.0;
+        AudioSystem::PlaySoundId(SND_MISSILE, b.Pan(x));
+        b.SpawnParticles(TextureManager::Get("smoke"), x, y, 0.0, 0.0, 4, 1.0, -0.01, -0.5, 40, true, -1);
+    }
+    void Update() override {
+        static constexpr double kStep = 17.143 * 0.017453292520882225;
+        double a = (frame - 10.0) * kStep;
+        vx = std::cos(a + 1.5705) * 3.0;
+        vy = std::sin(a + 1.5705) * 3.0;
+        x -= vx;
+        y += vy;
+        b.SpawnParticles(TextureManager::Get("spark"), vx * 5.0 + x, y - vy * 5.0, vx * 0.5, vy * -0.5, 1, 1.0, 0, 0, 30, true, -1);
+        if (!locked) {
+            double target = std::atan2(b.TankX() - x, (double)b.TankY() - y);
+            if (a <= target) {
+                frame += turn;
+                if (target <= turn * kStep + a) locked = true;
+            } else {
+                frame -= turn;
+                if (a - turn * kStep <= target) locked = true;
+            }
+        }
+        CheckGroundAndTank();
+    }
+};
+
+struct Head : Craft {
+    double tx = 0.0, ty = 160.0;    // +0x98 +0xa0
+    double maxSpeed;                // +0xb0
+    bool charging = false;          // +0xac
+    int delay = 500;                // +0xa8
+    int launch[2], launchDelay[2];  // +0x70 +0x78
+    int bombCycle = 0, bombOn, bombOff, bombFreq;   // +0x84 +0x88 +0x8c +0x90
+    Head(Board& bd) : Craft(bd, 0, "pupcopter") {
+        img = Grid("Images/head/head", 1);
+        const BossLevelDef* st = Stats(b, "Head");
+        hp = maxHp = st ? st->armor : 2800;
+        points = st ? st->score : 60000;
+        maxSpeed = st ? st->speed : 3.0;
+        for (int i = 0; i < 2; ++i)
+            launchDelay[i] = launch[i] = (st && i < (int)st->launchers.size()) ? st->launchers[i].fireInterval : 100 + 50 * i;
+        bombOn = st ? st->bombOn : 30;
+        bombOff = st ? st->bombOff : 30;
+        bombFreq = std::max(1, st ? st->bombFreq : 6);
+        // The XML charge delay is loaded (+0xb8) but the original always waits 500 ticks.
+        boss = true;
+        persistent = true;
+        mirror = false;
+        x = -440.0;
+        y = 160.0;
+        vx = vy = 0.0;
+    }
+    void UpdateF() override {}
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Update();
+        x += vx;
+        y += vy;
+        vx = (tx - x) * 0.02;
+        vy = (ty - y) * 0.02;
+        double sp = std::sqrt(vx * vx + vy * vy);
+        if (sp > maxSpeed) {
+            vx *= maxSpeed / sp;
+            vy *= maxSpeed / sp;
+        }
+        if (b.BossDying()) {
+            tx = 0.0;
+            ty = 200.0;
+            return;
+        }
+        if (!charging) {
+            tx = mirror ? 220.0 : -220.0;
+            ty = 160.0;
+            if (sp < 0.1) {
+                if (delay == 0) {
+                    charging = true;
+                    ty = 220.0;
+                    bombCycle = bombOn + bombOff;
+                    tx = mirror ? 440.0 : -440.0;
+                } else {
+                    --delay;
+                }
+            }
+        } else {
+            tx += mirror ? -3.0 : 3.0;
+            if (x < -520.0 || x > 520.0) {
+                charging = false;
+                mirror = !mirror;
+                delay = 500;
+            }
+        }
+        if (x > -300.0 && x < 300.0 && b.NukeFlash() == 0.0 && !charging) {
+            static const int kMuzzle[2] = { 76, 104 };
+            for (int i = 0; i < 2; ++i) {
+                if (b.TankDead()) launch[i] = launchDelay[i];
+                else --launch[i];
+                if (launch[i] < 1) {
+                    double mx = x + kMuzzle[i] - (mirror ? 2 * kMuzzle[i] : 0);
+                    b.AddHazard(std::make_unique<HeadMissile>(b, mx, y - 40.0, mirror));
+                    launch[i] = launchDelay[i];
+                }
+            }
+        }
+        if (charging && b.NukeFlash() == 0.0) {
+            if (bombCycle == 0) bombCycle = bombOn + bombOff;
+            else --bombCycle;
+            if (bombCycle < bombOn && b.App().tick % bombFreq == 0)
+                DropIronBomb(b, (int)((double)(Rand() % 40) + x - 20.0), (int)(y + 135.0), 0.0, 0.0, mirror);
+        }
+    }
+    void Draw() override {
+        if (b.Progress() >= b.Length()) Craft::Draw();
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+    }
+};
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
@@ -1087,6 +1221,7 @@ std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
         case 3: return std::make_unique<Wrecker>(b);
         case 4: return std::make_unique<Ape>(b);
         case 5: return std::make_unique<Eyebot>(b);
+        case 6: return std::make_unique<Head>(b);
         default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
     }
 }

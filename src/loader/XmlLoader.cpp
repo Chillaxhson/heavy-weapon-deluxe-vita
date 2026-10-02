@@ -214,7 +214,9 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
             }
 
             // Launchers
-            for (XMLElement* lElem = lvlElem->FirstChildElement("Launcher"); lElem != nullptr; lElem = lElem->NextSiblingElement("Launcher")) {
+            // "Launcher" (helicopter) or numbered "Launcher1", "Launcher2" (head).
+            for (XMLElement* lElem = lvlElem->FirstChildElement(); lElem != nullptr; lElem = lElem->NextSiblingElement()) {
+                if (std::string(lElem->Name()).rfind("Launcher", 0) != 0) continue;
                 BossLauncherDef launcher;
                 lElem->QueryIntAttribute("armor", &launcher.armor);
                 lElem->QueryIntAttribute("fire", &launcher.fireInterval);
@@ -231,6 +233,13 @@ bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::stri
             }
             if (const char* lc = lvlElem->Attribute("longchain")) bLevel.longChain = std::string(lc) == "yes";
             lvlElem->QueryDoubleAttribute("throw", &bLevel.throwSpeed);
+            lvlElem->QueryDoubleAttribute("speed", &bLevel.speed);
+            if (XMLElement* cElem = lvlElem->FirstChildElement("Charge")) cElem->QueryIntAttribute("delay", &bLevel.chargeDelay);
+            if (XMLElement* bElem = lvlElem->FirstChildElement("Bomb")) {
+                bElem->QueryIntAttribute("on", &bLevel.bombOn);
+                bElem->QueryIntAttribute("off", &bLevel.bombOff);
+                bElem->QueryIntAttribute("freq", &bLevel.bombFreq);
+            }
             if (XMLElement* hElem = lvlElem->FirstChildElement("Hand")) {
                 hElem->QueryIntAttribute("armor", &bLevel.handArmor);
                 hElem->QueryIntAttribute("fire", &bLevel.handFire);

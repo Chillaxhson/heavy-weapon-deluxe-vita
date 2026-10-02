@@ -45,6 +45,8 @@ struct BossLevelDef {
     double throwSpeed = 0.04;   // Ape: throw animation speed
     double jumpX = 1.35, jumpY = 4.0, jumpGravity = 0.06;
     int handArmor = 300, handFire = 20;   // Eye
+    double speed = 3.0;                   // Head
+    int chargeDelay = 500, bombOn = 30, bombOff = 30, bombFreq = 6;
 };
 
 struct BossDef {

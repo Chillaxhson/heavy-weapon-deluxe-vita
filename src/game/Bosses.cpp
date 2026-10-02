@@ -663,6 +663,157 @@ struct Wrecker : Craft {
     }
 };
 
+// ---------------------------------------------------------------------------------
+// Kommie Kong (0x438be0): a giant ape that throws bursting rockets three at a time,
+// then leaps to the other side of the screen and shakes the ground when it lands.
+// ---------------------------------------------------------------------------------
+
+// Bursting rocket (0x448130): flies level and bursts into shrapnel above the tank.
+struct BurstRocket : Hazard {
+    int fragments;
+    BurstRocket(Board& bd, double x_, double y_, double vx_, bool mirror_, int n)
+        : Hazard(bd, "burstrocket", x_, y_, vx_, 0.0, mirror_), fragments(n) {
+        hp = 80.0;
+        points = 100;
+    }
+    void Update() override {
+        x += vx;
+        frame += 0.2;
+        if (frame >= 8.0) frame = 0.0;
+        if (OffScreenX()) { Remove(); return; }
+        if (x < b.TankX() + 20.0 && x > b.TankX() - 20.0 && !b.TankDead()) {
+            b.SpawnExplosion(x, y, 140, 70, vx, vy);
+            for (double a = 1.5708; a < 7.8539; a += 6.282 / fragments) {   // 0x449fa0
+                Board::Bullet s;
+                s.x = x;
+                s.y = y;
+                s.vx = std::cos(a) * 3.0;
+                s.vy = std::sin(a) * -3.0;
+                s.gravity = 0.05;
+                s.enemy = true;
+                s.img = TextureManager::Get("bombfrag");
+                b.Bullets().push_back(s);
+            }
+            Remove();
+            return;
+        }
+        BaseUpdate();
+    }
+};
+
+struct Ape : Craft {
+    Texture* shadow;
+    int wait = 100;             // +0x74
+    int thrown = 0;             // +0x78 rockets in this volley
+    int crouch = 0;             // +0x7c
+    bool throwing = false;      // +0x80
+    int shake = 0;              // +0x84
+    double jumpX, jumpY, gravity, throwSpeed;
+    bool entered = false;
+    Ape(Board& bd) : Craft(bd, 0, "pupcopter") {
+        img = Grid("Images/ape/ape", 9);
+        shadow = Grid("Images/ape/shadow", 1);
+        const BossLevelDef* st = Stats(b, "Ape");
+        hp = maxHp = st ? st->armor : 2500;
+        points = st ? st->score : 50000;
+        throwSpeed = st ? st->throwSpeed : 0.04;
+        jumpX = st ? st->jumpX : 1.35;
+        jumpY = st ? st->jumpY : 4.0;
+        gravity = st ? st->jumpGravity : 0.06;
+        boss = true;
+        persistent = true;
+        mirror = true;          // facing left
+        x = 380.0;
+        y = 315.0;
+        vx = vy = 0.0;
+        frame = 0.0;
+    }
+    int Facing() const { return mirror ? 1 : 0; }
+    void UpdateF() override {}
+    void Update() override {
+        if (b.Progress() < b.Length()) return;
+        Craft::Update();
+        // Walk in with the scenery until the scroll has eased to a stop.
+        if (b.ScrollSpeed() >= 0.1) {
+            x -= b.ScrollSpeed() * 1.35;
+            return;
+        }
+        entered = true;
+        x += vx;
+        if (b.TankDead()) thrown = 3;
+        if (wait == 0) {
+            if (!throwing || b.BossDying()) {
+                if (crouch == 0) {
+                    vy = std::min(vy + gravity, jumpY);
+                    if (vy > 0.5) frame = 8.0;
+                    y += vy;
+                    if (y > 315.0) {
+                        if (!b.BossDying()) {
+                            shake = 0x80;
+                            AudioSystem::PlaySoundId(SND_BIGTHUD, b.Pan(x));
+                        }
+                        y = 315.0;
+                        vx = 0.0;
+                        frame = 0.0;
+                        if (std::abs((int)x) < 100) {
+                            crouch = 50;     // landed mid-screen: jump again
+                            frame = 6.0;
+                        } else {
+                            wait = 1;
+                            if (!b.BossDying()) mirror = !mirror;
+                        }
+                    }
+                } else if (--crouch == 0) {
+                    frame = 7.0;
+                    vy = -jumpY;
+                    vx = -(double)(Facing() * 2 - 1) * jumpX;
+                }
+            } else {
+                double prev = frame;
+                frame += throwSpeed;
+                if (frame > 5.9) {
+                    frame = 0.0;
+                    ++thrown;
+                    wait = 1;
+                }
+                if (frame >= 4.0 && prev < 4.0 && !b.BossDying())
+                    b.AddHazard(std::make_unique<BurstRocket>(b, x, y - 120.0, (double)(Facing() * -6 + 3), mirror, 6));
+            }
+        } else if (--wait == 0) {
+            if (thrown == 3) {
+                crouch = 50;
+                frame = 6.0;
+                thrown = 0;
+                throwing = false;
+            } else {
+                throwing = true;
+            }
+        }
+        if (shake != 0) {
+            b.Shake(shake);
+            shake -= 2;
+        }
+        // Hold the tank's deployment until the ape has moved clear of the drop zone.
+        if (b.RespawnTimer() == 2 && ((thrown == 3 && Facing() == 1) || (Facing() == 0 && x < 0.0)))
+            b.SetRespawnTimer(3);
+        if (!b.BossDying() && !b.TankDead() && b.HitsTank(img, (int)x, (int)y, (int)frame, 0, mirror)) b.KillTank();
+    }
+    void Draw() override {
+        if (b.Progress() < b.Length()) return;
+        Gfx::SetColorizeImages(true);
+        Gfx::SetColor(255, 255, 255, std::clamp((int)(255.0 - (315.0 - y)), 0, 255));
+        Gfx::DrawSprite(shadow, (int)(Facing() * 40 - 20 + x), 455, true);
+        Gfx::SetColorizeImages(false);
+        Craft::Draw();
+    }
+    void Die() override {
+        if (b.BossDying()) return;
+        b.CountCraft(0, 1, 0);
+        b.AddScore(points, (int)x, (int)y);
+        b.StartBossDeath();
+    }
+};
+
 } // namespace
 
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
@@ -672,6 +823,7 @@ std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
         case 1: return std::make_unique<Battleship>(b);
         case 2: return std::make_unique<Rainer>(b);
         case 3: return std::make_unique<Wrecker>(b);
+        case 4: return std::make_unique<Ape>(b);
         default: return nullptr;   // not ported yet: the post-boss sequence runs straight away
     }
 }

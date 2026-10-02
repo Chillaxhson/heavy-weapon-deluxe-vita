@@ -42,6 +42,8 @@ struct BossLevelDef {
     int dishUp = 400;
     int dishMeteors = 15;
     bool longChain = false;     // Wrecker
+    double throwSpeed = 0.04;   // Ape: throw animation speed
+    double jumpX = 1.35, jumpY = 4.0, jumpGravity = 0.06;
 };
 
 struct BossDef {

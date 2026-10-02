@@ -68,6 +68,8 @@ public:
     AppState& App() { return mApp; }
     const CraftDef& CraftStats(int type) const;
     bool TankDead() const { return mRespawn != 0; }
+    int RespawnTimer() const { return mRespawn; }
+    void SetRespawnTimer(int t) { mRespawn = t; }
     bool NearLevelEnd(int margin) const { return !mSurvival && mProgress >= mLength - margin; }
     bool Survival() const { return mSurvival; }
     int Tier() const;               // mission index, or progress/12000 in survival

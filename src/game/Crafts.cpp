@@ -22,7 +22,7 @@ Craft::Craft(Board& board, int t, const char* image) : b(board), type(t) {
     img = Img(image);
     b.CountCraft(1, 0, 0);
     const CraftDef& def = b.CraftStats(type);
-    hp = def.armor;
+    hp = maxHp = def.armor;
     points = def.points;
 }
 

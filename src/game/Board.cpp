@@ -1,4 +1,5 @@
 #include "game/Board.h"
+#include "game/Bosses.h"
 #include "game/Enemies.h"
 #include "game/Gfx.h"
 #include "game/Weapons.h"
@@ -94,8 +95,10 @@ void Board::Update() {
     if (!mSurvival) {
         // The boss arrives as the level runs out. Bosses are not ported yet, so the
         // post-boss sequence (gas station, then the debriefing) starts straight away.
-        // The counter waits at mLength for the boss; its death pushes it on (0x4138e0).
-        if (mProgress == mLength && mCrafts.empty()) BossDefeated();
+        if (mProgress == mLength - 1 && !mBoss) SpawnBoss();
+        // Bosses that are not ported yet: once the sky is clear the post-boss sequence
+        // runs as if the boss had been beaten.
+        if (mProgress == mLength && !mBoss && !mDeath && mCrafts.empty()) BossDefeated();
         // A mile sign passes every 5000 ticks.
         if (mProgress > 0 && mProgress < mLength && mProgress % 5000 == 0) --mMile;
     }
@@ -137,10 +140,14 @@ void Board::Update() {
     }
 
     // Same order as Board::Update (0x41b690).
+    if (mDeath) UpdateBossDeath();
     for (auto& c : mCrafts) {                       // 0x410ec0
-        if (mRespawn != 0) c->vx *= 1.01;           // enemies speed away while you are down
+        if (mRespawn != 0 && c.get() != mBoss) c->vx *= 1.01;   // enemies speed away while you are down
+        if (c.get() == mBoss && mBoss->hittable) mBossBarHidden = false;
         if (!c->dead) c->Update();
     }
+    for (auto& p : mPendingParts) mCrafts.push_back(std::move(p));
+    mPendingParts.clear();
     UpdateBullets();                                // 0x41add0
     for (auto& f : mFlak) f->Update();              // 0x410cf0
     EraseIf(mFlak, [](const std::unique_ptr<FlakBurst>& f) { return f->dead; });
@@ -199,8 +206,12 @@ void Board::Update() {
 // fixed fractions of it.
 void Board::UpdateF() {
     if (mGasX >= 10.0) {
-        mScrollSpeed += 0.01;
-        if (mScrollSpeed > 1.0) mScrollSpeed = 1.0;
+        if (!mBoss) {
+            mScrollSpeed += 0.01;
+            if (mScrollSpeed > 1.0) mScrollSpeed = 1.0;
+        } else {
+            mScrollSpeed *= 0.99;   // the battle comes to a halt
+        }
     } else {
         mScrollSpeed = mGasX * 0.1;
     }
@@ -649,9 +660,61 @@ void Board::SpawnExplosion(double x, double y, int w, int h, double vx, double v
 
 // 0x4138e0, after the boss's death animation: everything in the air is destroyed and
 // the refuelling stop rolls in.
+void Board::SpawnBoss() {
+    auto boss = CreateBoss(*this, mApp.mission);
+    if (!boss) return;
+    mBoss = boss.get();
+    mBossBarHidden = true;
+    mCrafts.push_back(std::move(boss));
+    for (auto& p : mPendingParts) mCrafts.push_back(std::move(p));
+    mPendingParts.clear();
+}
+
+void Board::AddPart(std::unique_ptr<Craft> part) {
+    mPendingParts.push_back(std::move(part));
+}
+
+const BossDef* Board::BossStats(const std::string& type) const {
+    if (!mBossDefs) return nullptr;
+    auto it = mBossDefs->find(type);
+    return it == mBossDefs->end() ? nullptr : &it->second;
+}
+
+// Boss death (0x41bf70 inside 0x4138e0): big explosions all over the wreck, every
+// 11-20 ticks; after the first the sky is cleared, after twenty it is over.
+void Board::UpdateBossDeath() {
+    if (!mBoss) return;
+    if (++mDeathTimer > 20) {
+        mDeathTimer = Rand() % 10;
+        ++mDeathCount;
+        int w = mBoss->W(), h = mBoss->H();
+        for (int tries = 0; tries < 50; ++tries) {
+            int px = (int)(Rand() % std::max(1, w) - w / 2 + mBoss->x);
+            int py = (int)(Rand() % std::max(1, h) - h / 2 + mBoss->y);
+            if (PixelHit(mBoss->img, (int)mBoss->x, (int)mBoss->y, 0, 0, mBoss->mirror, Img("bullets"), px, py, 0, 0, false)) {
+                SpawnExplosion(px, py, 160, 160, 0.0, 0.0);
+                break;
+            }
+        }
+    }
+    if (mDeathCount == 1) {
+        for (auto& hz : mHazards) hz->Remove();
+        EraseIf(mBullets, [](const Bullet& b) { return b.enemy; });
+    }
+    if (mDeathCount > 20) {
+        mDeath = false;
+        BossDefeated();
+    }
+}
+
 void Board::BossDefeated() {
+    Craft* boss = mBoss;
+    mBoss = nullptr;
     for (auto& c : mCrafts) {
-        if (!c->dead) {
+        if (c.get() == boss) {
+            c->persistent = false;   // already scored when it died
+            c->Remove();
+        } else if (!c->dead) {
             c->Die();
             c->Remove();
         }
@@ -1049,6 +1112,22 @@ void Board::Draw() {
     }
 
     Gfx::Translate(-320, 0);
+
+    // Boss health bar.
+    if (mBoss && !mBossBarHidden) {
+        FontRenderer::DrawStringBaseline("Outlined", "BOSS", 215 - (int)FontRenderer::GetStringWidth("Outlined", "BOSS") - 4 + Gfx::TransX(), 50, Color4f::White());
+        int w = std::max(0, (int)(200.0 / mBoss->maxHp * mBoss->hp));
+        if (mBoss->hittable) {
+            int r = (int)(std::cos((mApp.tick % 31) * 0.1) * 64.0 + 192.0);
+            Gfx::SetColor(r, 0, 0, 255);
+        } else {
+            Gfx::SetColor(255, 255, 255, 0x50);
+        }
+        Gfx::FillRect(220, 37, w, 15);
+        Gfx::SetColor(0, 0, 0, mBoss->hittable ? 255 : 0x50);
+        Gfx::FillRect(220 + w, 37, 200 - w, 15);
+    }
+
     DrawMessages();
     DrawHUD();
 }

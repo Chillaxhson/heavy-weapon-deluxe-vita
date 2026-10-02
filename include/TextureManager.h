@@ -31,6 +31,9 @@ public:
     // Loads or retrieves a texture by asset name or path, automatically handling alpha masks (.jpg + _.png)
     static Texture* Load(const std::string& relativePath);
     static Texture* Get(const std::string& relativePath);
+    // Load (or fetch) an image and give it an explicit cel grid (images outside the
+    // game's image table, such as boss parts).
+    static Texture* LoadGrid(const std::string& relativePath, int cols, int rows);
     static void Unload(const std::string& relativePath);
     static void Clear();
 

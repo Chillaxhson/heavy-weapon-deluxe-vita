@@ -376,6 +376,15 @@ Texture* TextureManager::Load(const std::string& relativePath) {
     return tex.id ? &sTextures[key] : nullptr;
 }
 
+Texture* TextureManager::LoadGrid(const std::string& relativePath, int cols, int rows) {
+    Texture* t = Load(relativePath);
+    if (t) {
+        t->cols = cols;
+        t->rows = rows;
+    }
+    return t;
+}
+
 Texture* TextureManager::Get(const std::string& relativePath) {
     return Load(relativePath);
 }

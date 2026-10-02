@@ -34,7 +34,9 @@ public:
     virtual void DeflectBullets() {}
 
     void Explode();                 // slot 5
-    void Remove() { dead = true; }
+    // A boss stays on the board through its death sequence (the original skips removing
+    // Board+0x2e4); Board::BossDefeated clears `persistent` and removes it.
+    void Remove() { if (!persistent) dead = true; }
 
     int W() const { return img ? img->GetCelWidth() : 0; }
     int H() const { return img ? img->GetCelHeight() : 0; }
@@ -50,6 +52,9 @@ public:
     bool friendly = false;                  // +0x38
     bool hittable = true;                   // +0x48
     double hp = 1;                          // +0x58
+    double maxHp = 1;                       // +0x40
+    bool boss = false;
+    bool persistent = false;
     const Texture* img = nullptr;           // +0x60
     int points = 0;                         // +0x64
     bool dead = false;
@@ -102,6 +107,6 @@ void DropFragBomb(Board& b, int x, int y, double vx, double vy, bool mirror);
 void DropLaserGuidedBomb(Board& b, int x, int y, double vx, double vy, bool fromRight);
 void DropFatBoy(Board& b, int x, int y, double vx, double vy, bool mirror);
 void FireRpg(Board& b, double x, double y, bool mirror, double arc);
-void FireMissile(Board& b, int x, int y, double vx, double vy);
+void FireMissile(Board& b, int x, int y, double vx, double vy, double speedScale = 1.0);
 
 } // namespace HeavyWeapon

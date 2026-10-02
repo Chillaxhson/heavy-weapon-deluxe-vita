@@ -361,9 +361,9 @@ void FireRpg(Board& b, double x, double y, bool mirror, double arc) {
     b.AddHazard(std::make_unique<Rpg>(b, x, y, mirror, arc));
 }
 
-void FireMissile(Board& b, int x, int y, double vx, double vy) {
+void FireMissile(Board& b, int x, int y, double vx, double vy, double speedScale) {
     if (!CanFire(b)) return;
-    b.AddHazard(std::make_unique<Missile>(b, x, y, vx, vy, 1.0));
+    b.AddHazard(std::make_unique<Missile>(b, x, y, vx, vy, speedScale));
 }
 
 // Craft type 12: a row of 2-5 missiles across the screen, more on later missions.

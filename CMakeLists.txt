@@ -25,6 +25,7 @@ set(SOURCES
     src/game/Hazards.cpp
     src/game/Supplies.cpp
     src/game/Weapons.cpp
+    src/game/Bosses.cpp
 )
 
 # ---------------------------------------------------------------------------

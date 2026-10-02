@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace HeavyWeapon {
@@ -97,6 +98,13 @@ public:
     void DropPowerUp(double x, double y, double vx, double vy, int type);     // 0x42c1b0
     void AddFriendly(int d) { mFriendlies += d; }
     void AddMessage(const std::string& text, int x, int y, bool rainbow, bool red = false);  // 0x42c000
+    // Bosses
+    void SetBossDefs(const std::unordered_map<std::string, BossDef>* defs) { mBossDefs = defs; }
+    const BossDef* BossStats(const std::string& type) const;
+    void AddPart(std::unique_ptr<Craft> part);
+    void StartBossDeath() { mDeath = true; mDeathTimer = 20; mDeathCount = 0; }
+    bool BossDying() const { return mDeath; }
+    double NukeFlash() const { return mNukeFlash; }
     double TankShieldPulse() const { return mShieldPulse; }
     void FlakHitHazards(const Texture* img, int x, int y) { HitHazard(img, x, y, 0, 0, 0.5); }
     int Pan(double x) const { return (int)(x * 3.0); }
@@ -229,6 +237,12 @@ private:
     double mOrbX[3] = {}, mOrbY[3] = {}, mOrbFlash[3] = {};   // +0xc8 (x, y, flash) * 3
     std::vector<Wave> mWaves;
     std::vector<std::unique_ptr<Craft>> mCrafts;     // list +0x1f4
+    std::vector<std::unique_ptr<Craft>> mPendingParts;
+    const std::unordered_map<std::string, BossDef>* mBossDefs = nullptr;
+    Craft* mBoss = nullptr;     // +0x2e4
+    bool mBossBarHidden = true; // +0x1e0 until the boss is in position
+    bool mDeath = false;        // +0x300 boss death sequence (0x41bf20)
+    int mDeathTimer = 0, mDeathCount = 0;
     std::vector<std::unique_ptr<Hazard>> mHazards;   // list +0x214
     std::vector<std::unique_ptr<Hazard>> mNewHazards;
 
@@ -255,6 +269,8 @@ private:
     void DrawBeams();
     void UpdateOrbs();              // 0x418770
     void BossDefeated();            // 0x4138e0 (final stage)
+    void SpawnBoss();
+    void UpdateBossDeath();         // 0x4138e0 / 0x41bf70
     void ShowMessage(const std::string& text);
     void DrawMessages();
     void UpdateTracks();            // 0x4116b0

@@ -236,6 +236,7 @@ void GameEngine::StartLevel(int levelIndex) {
         if (kv.second.id > 0 && kv.second.id < (int)byId.size()) byId[kv.second.id] = kv.second;
     }
     mBoard = std::make_unique<Board>(mApp, level, byId, false);
+    mBoard->SetBossDefs(&mBossDefs);
 
     AudioSystem::PlayMusic("Music/AtomicTank.mo3");
     AudioSystem::PlaySoundId(SND_V_GETREADY);
@@ -299,6 +300,7 @@ void GameEngine::UpdatePlaying(float dt) {
         int m = mApp.mission + 1;
         d.kills = mBoard->Kills();
         d.percent = mBoard->Spawned() > 0 ? (int)((double)mBoard->Kills() / mBoard->Spawned() * 100.0) : 0;
+        d.percent = std::clamp(d.percent, 0, 100);
         d.killBonus = d.percent == 100 ? m * 10000 : d.percent >= 95 ? m * 5000 : d.percent >= 90 ? m * 1000 : 0;
         d.friendlyBonus = mBoard->FriendlyKills() == 0 ? m * 5000 : 0;
         d.survivalBonus = mApp.lives == 2 ? m * 5000 : 0;

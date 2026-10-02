@@ -199,12 +199,21 @@ void Board::FireNuke() {
     mNukeFlash = 255.0;
     WorldRenderer::TriggerNuke();
 
-    // Every enemy craft in the air is destroyed.
+    // Every enemy craft in the air is destroyed; during a boss fight everything instead
+    // takes maxHP / (mission + 5) damage.
     for (auto& c : mCrafts) {
         if (c->dead || c->friendly || !c->hittable) continue;
         if (c->y - c->H() / 2 < 460.0) {
-            c->Die();
-            c->Remove();
+            if (!mBoss) {
+                c->Die();
+                c->Remove();
+            } else {
+                c->hp -= c->maxHp / (mApp.mission + 5);
+                if (c->hp < 0.0) {
+                    c->Die();
+                    c->Remove();
+                }
+            }
         }
     }
     // Enemy bullets are worth 10 each, hazards their own value.

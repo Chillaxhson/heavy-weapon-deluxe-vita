@@ -12,21 +12,49 @@ namespace HeavyWeapon {
 
 GameEngine::GameEngine() {}
 
+// Boot loading screen: backdrop + "LOADING" + a progress bar, presented at most every ~100 ms
+// so the screen never looks frozen but presenting stays cheap.
+struct LoadScreen {
+    std::string backdrop;
+    int texDone = 0, texTotal = 0, sndDone = 0, sndTotal = 0;
+    uint32_t lastPresent = 0;
+
+    void Draw() {
+        const int total = texTotal + sndTotal;
+        float frac = total > 0 ? (float)(texDone + sndDone) / (float)total : 0.0f;
+        Renderer::BeginFrame();
+        Renderer::DrawTexture(TextureManager::Get(backdrop), 0.0f, 0.0f);
+        const float bx = 170.0f, by = 430.0f, bw = 300.0f, bh = 12.0f;
+        const std::string label = "LOADING";
+        float tw = FontRenderer::GetStringWidth("RubberStampLET20", label);
+        FontRenderer::DrawStringBaseline("RubberStampLET20", label, (int)(320 - tw / 2), 420);
+        Renderer::DrawFillRect(bx - 2, by - 2, bw + 4, bh + 4, { 0.0f, 0.0f, 0.0f, 0.8f });
+        Renderer::DrawFillRect(bx, by, bw * std::clamp(frac, 0.0f, 1.0f), bh, { 0.95f, 0.75f, 0.1f, 1.0f });
+        Renderer::EndFrame();
+        lastPresent = SDL_GetTicks();
+    }
+    void Step() {
+        SDL_PumpEvents();
+        if (SDL_GetTicks() - lastPresent >= 100) Draw();
+    }
+};
+
 // Draws one frame of `backdrop` so the screen is not black, then loads every gameplay
-// texture and sound (once per app run; later calls are no-ops). Replaces the first-use
-// loads that used to stall the first seconds of each mission.
+// texture and sound (once per app run; later calls are no-ops) while showing progress.
+// Replaces the first-use loads that used to stall the first seconds of each mission.
 static void PreloadAssetsBehindFrame(const std::string& backdrop) {
     static bool sDone = false;
     if (sDone) return;
     sDone = true;
     PERF_BEGIN(perfPre);
-    Renderer::BeginFrame();
-    Renderer::DrawTexture(TextureManager::Get(backdrop), 0.0f, 0.0f);
-    Renderer::EndFrame();
+    LoadScreen ls;
+    ls.backdrop = backdrop;
+    ls.sndTotal = (int)SND_COUNT;
+    ls.Draw();
     PERF_LAP(perfPre, "preload backdrop frame");
-    TextureManager::PreloadAll();
+    TextureManager::PreloadAll([&](int done, int total) { ls.texDone = done; ls.texTotal = total; ls.Step(); });
     PERF_LAP(perfPre, "preload textures");
-    AudioSystem::PreloadAllSounds();
+    AudioSystem::PreloadAllSounds([&](int done, int) { ls.sndDone = done; ls.Step(); });
     PERF_LAP(perfPre, "preload sounds");
 }
 
@@ -53,19 +81,6 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
     XmlLoader::LoadWaves("data/waves.xml", mLevels);
     XmlLoader::LoadBosses("data/bosses.xml", mBossDefs);
     XmlLoader::LoadAnims("Images/Anims/Anims.xml", mLevelAnims);
-
-    // Preload essential PopCap audio
-    for (const char* sfx : {
-        "tankfire1", "tankfire2", "tankfire3", "tankfire4",
-        "tankexplode", "bigexplode", "smallexplode", "bullethit",
-        "nukeblast", "alert", "airraid", "flak", "missile", "bombfall",
-        "laser", "megalaser", "upgrade", "gunpowerup", "laserpowerup",
-        "diesel", "buttondown", "buttonup", "stats",
-        "v_atomictank", "v_getready", "v_levelcomplete", "v_gameover",
-        "v_megalaser", "v_prepare", "v_danger"
-    }) {
-        AudioSystem::PreloadSound(sfx);
-    }
 
     PreloadAssetsBehindFrame("mainmenu");
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -112,7 +113,7 @@ public:
     // Sound effects
     static void PlaySound(const std::string& name, float volumeMultiplier = 1.0f, int loops = 0);
     static void PreloadSound(const std::string& name);
-    static void PreloadAllSounds();   // every entry of the sound table, once at boot
+    static void PreloadAllSounds(const std::function<void(int, int)>& progress = {});   // every entry of the sound table, once at boot
 
     // Original game's PlaySound(id, pan): pan is -10000..10000, volume < 0 uses the
     // table volume. Call Tick() once per 100 Hz game tick for the repeat cooldowns.

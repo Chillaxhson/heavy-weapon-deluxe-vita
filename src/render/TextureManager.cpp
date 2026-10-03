@@ -430,15 +430,16 @@ static bool IsPreloadSkipped(const std::string& n) {
     return n == "map";
 }
 
-int TextureManager::PreloadAll() {
+int TextureManager::PreloadAll(const std::function<void(int, int)>& progress) {
     static bool sDone = false;
     if (sDone) return 0;
     sDone = true;
     PERF_BEGIN(t0);
-    int loaded = 0;
+    // Collect the names first so progress can report a total.
+    std::vector<std::string> names;
     for (const auto& meta : sImageMetaTable) {
         if (IsPreloadSkipped(meta.name)) continue;
-        if (LoadImpl(meta.name, true)) ++loaded;
+        names.push_back(meta.name);
     }
     // Boss sprites live in sub-folders of Images/ (ape, battleship, robot, worm...) and are
     // not in the image table. Every sub-folder except the per-theme Anims/Backgrounds ones.
@@ -450,8 +451,14 @@ int TextureManager::PreloadAll() {
         for (const std::string& file : Vfs::ListDirectory("Images/" + sub)) {
             std::string base = StripImageExtension(file);
             if (base == file || base.empty() || base[0] == '_' || base.back() == '_') continue;
-            if (LoadImpl("Images/" + sub + "/" + base, true)) ++loaded;
+            names.push_back("Images/" + sub + "/" + base);
         }
+    }
+    int loaded = 0, done = 0;
+    const int total = (int)names.size();
+    for (const std::string& n : names) {
+        if (LoadImpl(n, true)) ++loaded;
+        if (progress) progress(++done, total);
     }
     PERF_LOG("preload: %d textures loaded, total %.1f ms", loaded, PERF_NOW() - t0);
     return loaded;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -40,7 +41,8 @@ public:
     // Loads every gameplay image of the original image table (everything except the menu,
     // map, armory and loading screens and the per-theme backgrounds), so nothing loads
     // mid-fight. Idempotent; textures stay cached across missions. Returns the count loaded.
-    static int PreloadAll();
+    // `progress(done, total)` is called after each texture (may be empty).
+    static int PreloadAll(const std::function<void(int, int)>& progress = {});
 
     // Query dimensions and grid layout
     static void GetCelInfo(const std::string& name, int& outCols, int& outRows);

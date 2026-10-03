@@ -246,8 +246,13 @@ void AudioSystem::PreloadSound(const std::string& name) {
     }
 }
 
-void AudioSystem::PreloadAllSounds() {
-    for (const auto& meta : sSoundMetaTable) PreloadSound(meta.name);
+void AudioSystem::PreloadAllSounds(const std::function<void(int, int)>& progress) {
+    const int total = (int)SND_COUNT;
+    int done = 0;
+    for (const auto& meta : sSoundMetaTable) {
+        PreloadSound(meta.name);
+        if (progress) progress(++done, total);
+    }
 }
 
 void AudioSystem::PlaySound(const std::string& name, float volumeMultiplier, int loops) {

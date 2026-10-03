@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 
 namespace HeavyWeapon {
 
@@ -110,6 +111,7 @@ static const SoundMeta sSoundMetaTable[] = {
 };
 
 std::unordered_map<std::string, Mix_Chunk*> AudioSystem::sSounds;
+std::unordered_set<std::string> AudioSystem::sMissingSounds;
 Mix_Music* AudioSystem::sCurrentMusic = nullptr;
 int AudioSystem::sMusicVolume = 100;
 int AudioSystem::sSfxVolume = 100;
@@ -137,6 +139,7 @@ void AudioSystem::Shutdown() {
         }
     }
     sSounds.clear();
+    sMissingSounds.clear();
     Mix_CloseAudio();
 }
 
@@ -222,6 +225,7 @@ float AudioSystem::GetDefaultVolume(const std::string& name) {
 
 void AudioSystem::PreloadSound(const std::string& name) {
     if (sSounds.find(name) != sSounds.end()) return;
+    if (sMissingSounds.count(name)) return;   // known-missing or undecodable: do not retry
 
     std::string path = "Sounds/" + name;
     if (path.find('.') == std::string::npos) {
@@ -230,13 +234,20 @@ void AudioSystem::PreloadSound(const std::string& name) {
 
     std::string resolved = Vfs::Resolve(path);
     if (!Vfs::Exists(resolved)) {
+        sMissingSounds.insert(name);
         return;
     }
 
     Mix_Chunk* chunk = Mix_LoadWAV(resolved.c_str());
     if (chunk) {
         sSounds[name] = chunk;
+    } else {
+        sMissingSounds.insert(name);
     }
+}
+
+void AudioSystem::PreloadAllSounds() {
+    for (const auto& meta : sSoundMetaTable) PreloadSound(meta.name);
 }
 
 void AudioSystem::PlaySound(const std::string& name, float volumeMultiplier, int loops) {
@@ -279,6 +290,21 @@ void AudioSystem::UpdateEngineSound(bool moving) {
 
 void AudioSystem::PlayMusic(const std::string& path, bool loop) {
     StopMusic();
+
+    // MO3 (tracker module with compressed samples) cannot be decoded by this build; trying
+    // only wasted load time. Skip it (CONTEXT.md).
+    if (path.size() >= 4) {
+        std::string ext = path.substr(path.size() - 4);
+        for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+        if (ext == ".mo3") {
+            static bool sLogged = false;
+            if (!sLogged) {
+                sLogged = true;
+                std::cerr << "[AudioSystem] Skipping unsupported .mo3 music: " << path << std::endl;
+            }
+            return;
+        }
+    }
 
     std::string resolved = Vfs::Resolve(path);
     if (!Vfs::Exists(resolved)) {

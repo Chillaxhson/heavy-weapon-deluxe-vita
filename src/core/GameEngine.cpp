@@ -12,6 +12,24 @@ namespace HeavyWeapon {
 
 GameEngine::GameEngine() {}
 
+// Draws one frame of `backdrop` so the screen is not black, then loads every gameplay
+// texture and sound (once per app run; later calls are no-ops). Replaces the first-use
+// loads that used to stall the first seconds of each mission.
+static void PreloadAssetsBehindFrame(const std::string& backdrop) {
+    static bool sDone = false;
+    if (sDone) return;
+    sDone = true;
+    PERF_BEGIN(perfPre);
+    Renderer::BeginFrame();
+    Renderer::DrawTexture(TextureManager::Get(backdrop), 0.0f, 0.0f);
+    Renderer::EndFrame();
+    PERF_LAP(perfPre, "preload backdrop frame");
+    TextureManager::PreloadAll();
+    PERF_LAP(perfPre, "preload textures");
+    AudioSystem::PreloadAllSounds();
+    PERF_LAP(perfPre, "preload sounds");
+}
+
 GameEngine::~GameEngine() {
     Shutdown();
 }
@@ -48,6 +66,8 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
     }) {
         AudioSystem::PreloadSound(sfx);
     }
+
+    PreloadAssetsBehindFrame("mainmenu");
 
     mState = STATE_TITLE;
     mCurrentLevelIndex = std::clamp(opts.level, 0, std::max(0, (int)mLevels.size() - 1));
@@ -232,6 +252,7 @@ void GameEngine::StartLevel(int levelIndex) {
 
     const LevelDef* level = (levelIndex < (int)mLevels.size()) ? &mLevels[levelIndex] : nullptr;
     std::string theme = level ? level->bgTheme : "antagonistan";
+    PreloadAssetsBehindFrame("Images/Backgrounds/" + theme + "_sky");   // no-op after boot
     std::vector<AnimDef> anims;
     if (levelIndex < (int)mLevelAnims.size()) anims = mLevelAnims[levelIndex];
     WorldRenderer::SetTheme(theme, anims);

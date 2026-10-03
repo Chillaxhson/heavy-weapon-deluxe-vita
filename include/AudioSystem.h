@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <SDL2/SDL_mixer.h>
 
 namespace HeavyWeapon {
@@ -111,6 +112,7 @@ public:
     // Sound effects
     static void PlaySound(const std::string& name, float volumeMultiplier = 1.0f, int loops = 0);
     static void PreloadSound(const std::string& name);
+    static void PreloadAllSounds();   // every entry of the sound table, once at boot
 
     // Original game's PlaySound(id, pan): pan is -10000..10000, volume < 0 uses the
     // table volume. Call Tick() once per 100 Hz game tick for the repeat cooldowns.
@@ -135,6 +137,7 @@ public:
 
 private:
     static std::unordered_map<std::string, Mix_Chunk*> sSounds;
+    static std::unordered_set<std::string> sMissingSounds;
     static Mix_Music* sCurrentMusic;
     static int sMusicVolume;
     static int sSfxVolume;

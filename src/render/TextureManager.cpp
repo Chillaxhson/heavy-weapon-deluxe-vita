@@ -344,6 +344,10 @@ static std::string StripImageExtension(const std::string& path) {
 }
 
 Texture* TextureManager::Load(const std::string& relativePath) {
+    return LoadImpl(relativePath, false);
+}
+
+Texture* TextureManager::LoadImpl(const std::string& relativePath, bool quiet) {
     std::string key = NormalizeKey(relativePath);
     auto it = sTextures.find(key);
     if (it != sTextures.end()) {
@@ -367,7 +371,7 @@ Texture* TextureManager::Load(const std::string& relativePath) {
     }
 
     if (!found) {
-        std::cerr << "[TextureManager] File does not exist for asset: " << relativePath << " (key: " << key << ")" << std::endl;
+        if (!quiet) std::cerr << "[TextureManager] File does not exist for asset: " << relativePath << " (key: " << key << ")" << std::endl;
         sTextures[key] = Texture{}; // remember the miss so it is not searched for every frame
         return nullptr;
     }
@@ -410,6 +414,34 @@ void TextureManager::Clear() {
         }
     }
     sTextures.clear();
+}
+
+} // namespace HeavyWeapon
+
+namespace HeavyWeapon {
+
+static bool IsPreloadSkipped(const std::string& n) {
+    static const char* kPrefixes[] = {
+        "title", "loading", "cursor_", "backgrounds/", "mainmenu", "mainsmallbtn", "mainbigbtn",
+        "mainglow", "mission", "upgradebtns", "armory", "credits", "atmenu", "help", "mouse",
+        "advancebtn", "maprect", "mappointer"
+    };
+    for (const char* p : kPrefixes) if (n.rfind(p, 0) == 0) return true;
+    return n == "map";
+}
+
+int TextureManager::PreloadAll() {
+    static bool sDone = false;
+    if (sDone) return 0;
+    sDone = true;
+    PERF_BEGIN(t0);
+    int loaded = 0;
+    for (const auto& meta : sImageMetaTable) {
+        if (IsPreloadSkipped(meta.name)) continue;
+        if (LoadImpl(meta.name, true)) ++loaded;
+    }
+    PERF_LOG("preload: %d textures loaded, total %.1f ms", loaded, PERF_NOW() - t0);
+    return loaded;
 }
 
 } // namespace HeavyWeapon

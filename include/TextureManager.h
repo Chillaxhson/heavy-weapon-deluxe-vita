@@ -37,11 +37,17 @@ public:
     static void Unload(const std::string& relativePath);
     static void Clear();
 
+    // Loads every gameplay image of the original image table (everything except the menu,
+    // map, armory and loading screens and the per-theme backgrounds), so nothing loads
+    // mid-fight. Idempotent; textures stay cached across missions. Returns the count loaded.
+    static int PreloadAll();
+
     // Query dimensions and grid layout
     static void GetCelInfo(const std::string& name, int& outCols, int& outRows);
 
 private:
     static std::unordered_map<std::string, Texture> sTextures;
+    static Texture* LoadImpl(const std::string& relativePath, bool quiet);
     static Texture LoadFromFiles(const std::string& colorPath, const std::string& maskPath, int cols, int rows, bool keepAlpha);
 };
 

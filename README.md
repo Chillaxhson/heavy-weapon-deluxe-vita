@@ -16,16 +16,16 @@ A native **PlayStation Vita** source port of PopCap Games' classic arcade side-s
   * **Right Analog Stick**: 360° fluid turret aiming and direction-guided auto-fire.
   * **R1 / Cross (✕)**: Fire Heavy Cannon.
   * **L1 / Triangle (△)**: Nuclear Bomb (Nuke).
-  * **Square (□)**: Megalaser screen-clearing blast.
   * **Touchscreen**: Tap to navigate menus, select missions, and purchase Armory upgrades.
-* **Full Campaign & Survival**:
-  * All 19 missions with historical intel briefings loaded from `data/levels.xml`.
+* **Campaign** (Survival mode is not implemented yet):
+  * All 19 missions loaded from `data/levels.xml`, with the original bosses.
   * Complete wave scheduling loaded from `data/waves.xml`.
   * All 20+ enemy aircraft, ground vehicles, and multi-part bosses loaded from `data/craft.xml` and `data/bosses.xml`.
-  * 4-plane parallax scrolling and ambient animations from `Images/Anims/Anims.xml`.
+  * 4-plane parallax scrolling. The purely decorative background animations (igloos, snowmen, ...) are off by default (`kDecorativeAnims` in `Constants.h`).
   * Complete Armory upgrade tree (Heavy Cannon, Defense Pods, Homing Missiles, Laser, Flak, Thunderstrike, Nukes).
 * **Hardware Accelerated 2D Rendering**: Powered by **VitaGL** and **SDL2**, featuring PopCap dual-file alpha mask merging (`.jpg` + `_.png`), additive blend modes, and particle physics.
-* **Audio**: High-fidelity sound effects and music via `SDL2_mixer`.
+* **Audio**: Sound effects and menu music via `SDL2_mixer`, with a music on/off option (Options on the main menu). `AtomicTank.mo3` cannot be decoded yet, so in-mission music is silent.
+* **Loading**: all sprites and sounds are loaded once at start-up (about 8-9 s on a Vita, with a progress bar) so missions run without hitches.
 
 ---
 
@@ -79,10 +79,10 @@ tools/desktop/hw.sh run      # play in a window (keyboard + mouse, sound)
 tools/desktop/hw.sh shot shots/play.png --state play --level 2 --frames 300   # headless screenshot
 ```
 
-Game options: `--state title|map|play|armory`, `--level N` (0-based mission),
+Game options: `--state title|map|play|armory|options|help`, `--level N` (0-based mission),
 `--frames N` (quit after N fixed-timestep frames), `--stretch`, `--scale N` (window size).
 Desktop controls: A/D or arrows to drive, mouse to aim, left click or Ctrl to fire,
-X or right click for a nuke, C for the megalaser, Enter to confirm, Esc to pause/back.
+X or right click for a nuke, Tab for music on/off, Enter to confirm, Esc to pause/back.
 
 ---
 
@@ -94,10 +94,10 @@ X or right click for a nuke, C for the megalaser, Enter to confirm, Esc to pause
 | **Right Stick** | 360° Turret Aiming (Hold to Auto-Fire) |
 | **Cross (✕) / R1** | Fire Heavy Cannon |
 | **Triangle (△) / L1** | Detonate Nuclear Bomb (Nuke) |
-| **Square (□)** | Fire Megalaser (when meter is charged) |
 | **Start** | Pause / Resume Game |
+| **Select** | Music on / off |
 | **Circle (○)** | Cancel / Retire to Title |
-| **Touchscreen** | Armory Upgrades, Mission Select, and Menus |
+| **Touchscreen** | Menus (aim / drive / fire by touch when no stick is in use) |
 
 ---
 

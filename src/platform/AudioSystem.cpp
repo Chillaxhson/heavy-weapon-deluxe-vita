@@ -352,7 +352,7 @@ void AudioSystem::PlayMusic(const std::string& path, bool loop) {
     if (!sMusicEnabled) return;   // nothing is loaded while music is off
 
     // MO3 (tracker module with compressed samples) cannot be decoded by this build; trying
-    // only wasted load time. Skip it (CONTEXT.md).
+    // only wasted load time. Skip it.
     if (path.size() >= 4) {
         std::string ext = path.substr(path.size() - 4);
         for (char& c : ext) c = (char)std::tolower((unsigned char)c);

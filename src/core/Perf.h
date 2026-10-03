@@ -1,5 +1,5 @@
 #pragma once
-// Lightweight profiler for the mission-start lag investigation (plans/perf-startup-lag.md).
+// Lightweight profiler for the mission-start lag investigation.
 // Everything compiles away unless built with -DHW_PERF=ON, so release builds are unchanged.
 // Output goes to stdout and to perf.log (Vita: ux0:data/heavyweapon/perf.log), flushed per line.
 

@@ -116,8 +116,21 @@ Mix_Music* AudioSystem::sCurrentMusic = nullptr;
 int AudioSystem::sMusicVolume = 100;
 int AudioSystem::sSfxVolume = 100;
 int AudioSystem::sEngineChannel = -1;
+SDL_mutex* AudioSystem::sSoundMutex = nullptr;
+SDL_Thread* AudioSystem::sPreloadThread = nullptr;
+volatile int AudioSystem::sPreloadDone = 0;
+volatile int AudioSystem::sPreloadRunning = 0;
+
+namespace {
+struct SoundLock {
+    SDL_mutex* m;
+    explicit SoundLock(SDL_mutex* mu) : m(mu) { if (m) SDL_LockMutex(m); }
+    ~SoundLock() { if (m) SDL_UnlockMutex(m); }
+};
+}
 
 void AudioSystem::Init() {
+    if (!sSoundMutex) sSoundMutex = SDL_CreateMutex();
     if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
         std::cerr << "[AudioSystem] Mix_OpenAudio error: " << Mix_GetError() << std::endl;
         return;
@@ -128,6 +141,7 @@ void AudioSystem::Init() {
 }
 
 void AudioSystem::Shutdown() {
+    FinishPreload();
     StopMusic();
     if (sEngineChannel >= 0) {
         Mix_HaltChannel(sEngineChannel);
@@ -170,16 +184,12 @@ void AudioSystem::PlaySoundId(int id, int pan, float volume) {
     sCooldown[id] = (id == SND_BIGEXPLODE || id == SND_SMALLEXPLODE) ? 20 : 10;
 
     const std::string name = sSoundMetaTable[id].name;
-    auto it = sSounds.find(name);
-    if (it == sSounds.end()) {
-        PreloadSound(name);
-        it = sSounds.find(name);
-    }
-    if (it == sSounds.end() || !it->second) return;
+    Mix_Chunk* chunk = GetChunk(name);
+    if (!chunk) return;
 
     float base = volume >= 0.0f ? volume : (float)sSoundMetaTable[id].defaultVolume;
-    Mix_VolumeChunk(it->second, std::clamp((int)(sSfxVolume * base), 0, 128));
-    int channel = Mix_PlayChannel(-1, it->second, 0);
+    Mix_VolumeChunk(chunk, std::clamp((int)(sSfxVolume * base), 0, 128));
+    int channel = Mix_PlayChannel(-1, chunk, 0);
     if (channel >= 0) ApplyPan(channel, pan);
 }
 
@@ -196,14 +206,10 @@ void AudioSystem::SetLoop(int id, bool on, int pan) {
         return;
     }
     const std::string name = sSoundMetaTable[id].name;
-    auto it = sSounds.find(name);
-    if (it == sSounds.end()) {
-        PreloadSound(name);
-        it = sSounds.find(name);
-    }
-    if (it == sSounds.end() || !it->second) return;
-    Mix_VolumeChunk(it->second, std::clamp((int)(sSfxVolume * sSoundMetaTable[id].defaultVolume), 0, 128));
-    int c = Mix_PlayChannel(-1, it->second, -1);
+    Mix_Chunk* chunk = GetChunk(name);
+    if (!chunk) return;
+    Mix_VolumeChunk(chunk, std::clamp((int)(sSfxVolume * sSoundMetaTable[id].defaultVolume), 0, 128));
+    int c = Mix_PlayChannel(-1, chunk, -1);
     if (c >= 0) {
         ApplyPan(c, pan);
         ch = c + 1;
@@ -224,8 +230,11 @@ float AudioSystem::GetDefaultVolume(const std::string& name) {
 }
 
 void AudioSystem::PreloadSound(const std::string& name) {
-    if (sSounds.find(name) != sSounds.end()) return;
-    if (sMissingSounds.count(name)) return;   // known-missing or undecodable: do not retry
+    {
+        SoundLock lock(sSoundMutex);
+        if (sSounds.find(name) != sSounds.end()) return;
+        if (sMissingSounds.count(name)) return;   // known-missing or undecodable: do not retry
+    }
 
     std::string path = "Sounds/" + name;
     if (path.find('.') == std::string::npos) {
@@ -233,17 +242,29 @@ void AudioSystem::PreloadSound(const std::string& name) {
     }
 
     std::string resolved = Vfs::Resolve(path);
-    if (!Vfs::Exists(resolved)) {
-        sMissingSounds.insert(name);
-        return;
-    }
+    bool exists = Vfs::Exists(resolved);
+    // Decode outside the lock so the main thread never waits on the worker's decoding.
+    Mix_Chunk* chunk = exists ? Mix_LoadWAV(resolved.c_str()) : nullptr;
 
-    Mix_Chunk* chunk = Mix_LoadWAV(resolved.c_str());
+    SoundLock lock(sSoundMutex);
     if (chunk) {
-        sSounds[name] = chunk;
-    } else {
+        if (sSounds.find(name) != sSounds.end()) Mix_FreeChunk(chunk);   // lost a race with the other thread
+        else sSounds[name] = chunk;
+    } else if (sSounds.find(name) == sSounds.end()) {
         sMissingSounds.insert(name);
     }
+}
+
+Mix_Chunk* AudioSystem::GetChunk(const std::string& name) {
+    {
+        SoundLock lock(sSoundMutex);
+        auto it = sSounds.find(name);
+        if (it != sSounds.end()) return it->second;
+    }
+    PreloadSound(name);
+    SoundLock lock(sSoundMutex);
+    auto it = sSounds.find(name);
+    return it != sSounds.end() ? it->second : nullptr;
 }
 
 void AudioSystem::PreloadAllSounds(const std::function<void(int, int)>& progress) {
@@ -251,38 +272,56 @@ void AudioSystem::PreloadAllSounds(const std::function<void(int, int)>& progress
     int done = 0;
     for (const auto& meta : sSoundMetaTable) {
         PreloadSound(meta.name);
-        if (progress) progress(++done, total);
+        sPreloadDone = ++done;
+        if (progress) progress(done, total);
+    }
+}
+
+void AudioSystem::StartPreloadThread() {
+    if (sPreloadThread) return;
+    sPreloadDone = 0;
+    sPreloadRunning = 1;
+    sPreloadThread = SDL_CreateThreadWithStackSize(
+        [](void*) -> int {
+            PreloadAllSounds();
+            sPreloadRunning = 0;
+            return 0;
+        }, "SoundPreload", 512 * 1024, nullptr);
+    if (!sPreloadThread) {   // no thread available: fall back to loading inline
+        sPreloadRunning = 0;
+        PreloadAllSounds();
+    }
+}
+
+int AudioSystem::PreloadedSoundCount() { return sPreloadDone; }
+bool AudioSystem::PreloadRunning() { return sPreloadRunning != 0; }
+
+void AudioSystem::FinishPreload() {
+    if (sPreloadThread) {
+        SDL_WaitThread(sPreloadThread, nullptr);
+        sPreloadThread = nullptr;
     }
 }
 
 void AudioSystem::PlaySound(const std::string& name, float volumeMultiplier, int loops) {
-    auto it = sSounds.find(name);
-    if (it == sSounds.end()) {
-        PreloadSound(name);
-        it = sSounds.find(name);
-    }
-
-    if (it != sSounds.end() && it->second) {
+    Mix_Chunk* chunk = GetChunk(name);
+    if (chunk) {
         float baseVol = GetDefaultVolume(name);
         int vol = (int)(sSfxVolume * baseVol * volumeMultiplier);
         if (vol < 0) vol = 0;
         if (vol > 128) vol = 128;
-        Mix_VolumeChunk(it->second, vol);
-        Mix_PlayChannel(-1, it->second, loops);
+        Mix_VolumeChunk(chunk, vol);
+        Mix_PlayChannel(-1, chunk, loops);
     }
 }
 
 void AudioSystem::UpdateEngineSound(bool moving) {
     if (moving) {
         if (sEngineChannel < 0 || !Mix_Playing(sEngineChannel)) {
-            auto it = sSounds.find("diesel");
-            if (it == sSounds.end()) {
-                PreloadSound("diesel");
-                it = sSounds.find("diesel");
-            }
-            if (it != sSounds.end() && it->second) {
-                Mix_VolumeChunk(it->second, (int)(sSfxVolume * 0.35f));
-                sEngineChannel = Mix_PlayChannel(-1, it->second, -1); // Loop indefinitely
+            Mix_Chunk* chunk = GetChunk("diesel");
+            if (chunk) {
+                Mix_VolumeChunk(chunk, (int)(sSfxVolume * 0.35f));
+                sEngineChannel = Mix_PlayChannel(-1, chunk, -1); // Loop indefinitely
             }
         }
     } else {

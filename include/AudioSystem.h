@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <SDL2/SDL_mixer.h>
+#include <SDL2/SDL_mutex.h>
+#include <SDL2/SDL_thread.h>
 
 namespace HeavyWeapon {
 
@@ -113,7 +115,13 @@ public:
     // Sound effects
     static void PlaySound(const std::string& name, float volumeMultiplier = 1.0f, int loops = 0);
     static void PreloadSound(const std::string& name);
-    static void PreloadAllSounds(const std::function<void(int, int)>& progress = {});   // every entry of the sound table, once at boot
+    static void PreloadAllSounds(const std::function<void(int, int)>& progress = {});
+    // Same, on a worker thread so texture uploads can overlap the OGG decoding. Poll
+    // PreloadedSoundCount()/PreloadRunning(); FinishPreload() joins (safe to call any time).
+    static void StartPreloadThread();
+    static int PreloadedSoundCount();
+    static bool PreloadRunning();
+    static void FinishPreload();   // every entry of the sound table, once at boot
 
     // Original game's PlaySound(id, pan): pan is -10000..10000, volume < 0 uses the
     // table volume. Call Tick() once per 100 Hz game tick for the repeat cooldowns.
@@ -145,6 +153,13 @@ private:
     static int sEngineChannel;
     static int sCooldown[SND_COUNT];
     static int sLoopChannel[SND_COUNT];
+
+    // Looks up a loaded chunk (lazy-loading it), thread-safe against the preload worker.
+    static Mix_Chunk* GetChunk(const std::string& name);
+    static SDL_mutex* sSoundMutex;
+    static SDL_Thread* sPreloadThread;
+    static volatile int sPreloadDone;
+    static volatile int sPreloadRunning;
 
     static float GetDefaultVolume(const std::string& name);
 };

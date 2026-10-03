@@ -52,10 +52,22 @@ static void PreloadAssetsBehindFrame(const std::string& backdrop) {
     ls.sndTotal = (int)SND_COUNT;
     ls.Draw();
     PERF_LAP(perfPre, "preload backdrop frame");
-    TextureManager::PreloadAll([&](int done, int total) { ls.texDone = done; ls.texTotal = total; ls.Step(); });
-    PERF_LAP(perfPre, "preload textures");
-    AudioSystem::PreloadAllSounds([&](int done, int) { ls.sndDone = done; ls.Step(); });
-    PERF_LAP(perfPre, "preload sounds");
+    AudioSystem::StartPreloadThread();
+    TextureManager::PreloadAll([&](int done, int total) {
+        ls.texDone = done; ls.texTotal = total;
+        ls.sndDone = AudioSystem::PreloadedSoundCount();
+        ls.Step();
+    });
+    PERF_LAP(perfPre, "preload textures (main thread)");
+    // Sounds decode on a worker while textures upload here; wait for the rest behind the screen.
+    while (AudioSystem::PreloadRunning()) {
+        ls.sndDone = AudioSystem::PreloadedSoundCount();
+        ls.Step();
+        SDL_Delay(5);
+    }
+    AudioSystem::FinishPreload();
+    ls.sndDone = ls.sndTotal;
+    PERF_LAP(perfPre, "preload sounds (wait after textures)");
 }
 
 GameEngine::~GameEngine() {

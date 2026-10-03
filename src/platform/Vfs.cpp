@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <algorithm>
 #include <unordered_map>
+#include <mutex>
 #include "core/Perf.h"
 
 namespace HeavyWeapon {
@@ -78,9 +79,12 @@ static std::string FindCaseInsensitive(const std::string& root, const std::strin
     return current;
 }
 
+// The sound preload worker resolves paths while the main thread loads textures.
+static std::mutex sVfsMutex;
 static std::unordered_map<std::string, std::string> sMemo;
 
 void Vfs::Init(const std::string& customBasePath) {
+    std::lock_guard<std::mutex> lock(sVfsMutex);
     sMemo.clear();
     sSearchPaths.clear();
     if (!customBasePath.empty()) {
@@ -104,6 +108,7 @@ static const std::string& ResolveMemo(const std::string& relativePath, const std
     if (!scratch.empty() && scratch[0] == '/') scratch.erase(0, 1);
 
     const std::string key = ToLower(scratch);
+    std::lock_guard<std::mutex> lock(sVfsMutex);
     auto memo = sMemo.find(key);
     if (memo != sMemo.end()) {
         found = !memo->second.empty();
@@ -148,6 +153,7 @@ std::vector<std::string> Vfs::ListDirectory(const std::string& relativeDir) {
     if (!Exists(relativeDir)) return names;
     std::string dir = Resolve(relativeDir);
     if (dir.size() > 1 && dir.back() == '/') dir.pop_back();
+    std::lock_guard<std::mutex> lock(sVfsMutex);
     for (const auto& kv : GetListing(dir)) {
         if (kv.second != "." && kv.second != "..") names.push_back(kv.second);
     }

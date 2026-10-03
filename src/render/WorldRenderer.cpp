@@ -31,6 +31,7 @@ void WorldRenderer::SetTheme(const std::string& themeName, const std::vector<Ani
 
     sAnims.clear();
     for (const auto& def : levelAnims) {
+        if (!kDecorativeAnims) break;
         ActiveAnim anim;
         anim.def = def;
         anim.currentFrame = 0.0f;

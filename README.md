@@ -8,6 +8,16 @@ A native **PlayStation Vita** source port of PopCap Games' classic arcade side-s
 
 ---
 
+## Screenshots
+
+| Main Menu | Mission Map |
+| :---: | :---: |
+| ![Main Menu](screenshots/img_2.png) | ![Mission Map](screenshots/img_1.png) |
+| **In-Game Combat** | **Hostile Squadron** |
+| ![In-Game Combat](screenshots/img_3.png) | ![Hostile Squadron](screenshots/img_4.png) |
+
+---
+
 ## Features
 
 * **Original 640×480 presentation**: The game renders at its native 640×480 (every asset is authored for it) into an offscreen target that is scaled to the Vita display, pillarboxed at 4:3 (725×544) by default, or stretched to fill.

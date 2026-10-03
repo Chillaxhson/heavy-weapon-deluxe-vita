@@ -153,6 +153,10 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
         if (opts.startProgress != -1) {
             mBoard->SetProgress(opts.startProgress >= 0 ? opts.startProgress : mBoard->Length() + opts.startProgress);
         }
+    } else if (opts.startState == "options") {
+        mState = STATE_OPTIONS;
+    } else if (opts.startState == "help") {
+        mState = STATE_HELP;
     } else if (opts.startState == "armory") {
         mUpgradePoints = 3;
         mState = STATE_ARMORY;
@@ -220,6 +224,8 @@ void GameEngine::Update(float dt) {
         case STATE_PAUSED:         UpdatePaused(dt); break;
         case STATE_GAMEOVER:       UpdateGameOver(dt); break;
         case STATE_DEBRIEF:        UpdateDebrief(); break;
+        case STATE_OPTIONS:        UpdateOptions(); break;
+        case STATE_HELP:           UpdateHelp(); break;
         default: break;
     }
 }
@@ -300,12 +306,64 @@ void GameEngine::UpdateTitle(float dt) {
             mApp = AppState();
             StartLevel(0);
             break;
+        case MENU_OPTIONS:
+            mOptionsSelection = 0;
+            mState = STATE_OPTIONS;
+            break;
+        case MENU_HELP:
+            mState = STATE_HELP;
+            break;
         case MENU_QUIT:
             mRunning = false;
             break;
         default:
-            AudioSystem::PlaySound("denied", 0.5f); // Heroes / Options / Help not implemented yet
+            AudioSystem::PlaySound("denied", 0.5f); // Heroes not implemented yet
             break;
+    }
+}
+
+// Options and Help screens: a dark panel over the title art.
+static const float kOptRowX = 170.0f, kOptRowW = 300.0f, kOptRowH = 40.0f;
+static const float kOptRowY[2] = { 160.0f, 220.0f };   // MUSIC, BACK
+
+void GameEngine::UpdateOptions() {
+    const InputState& input = InputManager::GetState();
+    const int kRows = 2;
+    int prevSel = mOptionsSelection;
+    if (input.upPressed) mOptionsSelection = (mOptionsSelection + kRows - 1) % kRows;
+    if (input.downPressed) mOptionsSelection = (mOptionsSelection + 1) % kRows;
+
+    bool activate = input.confirmPressed;
+    if (input.pointerAim || input.touchPressed) {
+        for (int i = 0; i < kRows; ++i) {
+            if (InRect(input.touchX, input.touchY, kOptRowX, kOptRowY[i], kOptRowW, kOptRowH)) {
+                mOptionsSelection = i;
+                activate |= input.touchPressed;
+            }
+        }
+    }
+    if (mOptionsSelection != prevSel) AudioSystem::PlaySound("mapover", 0.5f);
+
+    if (input.cancelPressed) {
+        AudioSystem::PlaySound("buttonup");
+        mState = STATE_TITLE;
+    } else if (input.musicTogglePressed) {
+        ToggleMusic();
+    } else if (activate) {
+        if (mOptionsSelection == 0) {
+            ToggleMusic();
+        } else {
+            AudioSystem::PlaySound("buttonup");
+            mState = STATE_TITLE;
+        }
+    }
+}
+
+void GameEngine::UpdateHelp() {
+    const InputState& input = InputManager::GetState();
+    if (input.cancelPressed || input.confirmPressed || input.touchPressed) {
+        AudioSystem::PlaySound("buttonup");
+        mState = STATE_TITLE;
     }
 }
 
@@ -594,6 +652,8 @@ void GameEngine::Render() {
         case STATE_PAUSED:         RenderPlaying(); RenderPaused(); break;
         case STATE_GAMEOVER:       RenderPlaying(); RenderGameOver(); break;
         case STATE_DEBRIEF:        RenderDebrief(); break;
+        case STATE_OPTIONS:        RenderOptions(); break;
+        case STATE_HELP:           RenderHelp(); break;
         default: break;
     }
 
@@ -733,6 +793,87 @@ void GameEngine::RenderPaused() {
     FontRenderer::DrawString("Normal", "START: RESUME    CIRCLE: RETIRE TO TITLE", SCREEN_WIDTH * 0.5f, 290.0f, { 0.85f, 0.85f, 0.85f, 1.0f }, 1.0f, ALIGN_CENTER);
     std::string music = std::string(MusicLabel()) + "   (SELECT)";
     FontRenderer::DrawString("Normal", music, SCREEN_WIDTH * 0.5f, 335.0f, { 0.85f, 0.85f, 0.85f, 1.0f }, 1.0f, ALIGN_CENTER);
+}
+
+static void DrawMenuPanelBackdrop(const char* title) {
+    Renderer::DrawTexture(TextureManager::Get("mainmenu"), 0.0f, 0.0f);
+    Renderer::DrawFillRect(0.0f, 0.0f, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT, { 0.0f, 0.0f, 0.0f, 0.93f });
+    FontRenderer::DrawString("RubberStampLET42", title, SCREEN_WIDTH * 0.5f, 22.0f, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, ALIGN_CENTER);
+}
+
+void GameEngine::RenderOptions() {
+    DrawMenuPanelBackdrop("OPTIONS");
+    const std::string rows[2] = { MusicLabel(), "BACK" };
+    for (int i = 0; i < 2; ++i) {
+        bool sel = (mOptionsSelection == i);
+        if (sel) {
+            float a = 0.25f + 0.1f * std::sin(mMenuGlowAnim);
+            Renderer::DrawFillRect(kOptRowX, kOptRowY[i], kOptRowW, kOptRowH, { 0.3f, 1.0f, 0.3f, a });
+            Renderer::DrawRect(kOptRowX, kOptRowY[i], kOptRowW, kOptRowH, { 0.3f, 1.0f, 0.3f, 0.9f });
+        }
+        FontRenderer::DrawString("Normal", rows[i], SCREEN_WIDTH * 0.5f, kOptRowY[i] + 10.0f,
+                                 sel ? Color4f{ 1.0f, 1.0f, 1.0f, 1.0f } : Color4f{ 0.7f, 0.7f, 0.7f, 1.0f }, 1.0f, ALIGN_CENTER);
+    }
+#ifdef __vita__
+    const char* hint = "CROSS: CHANGE    CIRCLE: BACK    OR TAP";
+#else
+    const char* hint = "ENTER/CLICK: CHANGE    ESC: BACK";
+#endif
+    FontRenderer::DrawString("Normal", hint, SCREEN_WIDTH * 0.5f, 400.0f, { 0.6f, 0.6f, 0.6f, 1.0f }, 1.0f, ALIGN_CENTER);
+}
+
+// Read-only keymap. Mirrors the bindings in InputManager.cpp; keep the two in sync.
+void GameEngine::RenderHelp() {
+    DrawMenuPanelBackdrop("CONTROLS");
+    struct Row { const char* keys; const char* what; };
+    static const Row kPad[] = {
+        { "LEFT STICK / D-PAD", "MOVE" },
+        { "RIGHT STICK",        "AIM (PUSH FAR = AUTO-FIRE)" },
+        { "CROSS (A) / R",      "FIRE" },
+        { "TRIANGLE (Y) / L",   "NUKE" },
+        { "START",              "PAUSE" },
+        { "SELECT",             "MUSIC ON/OFF" },
+        { "CROSS / CIRCLE",     "MENU: CONFIRM / BACK" },
+    };
+#ifdef __vita__
+    static const Row kTouch[] = {
+        { "TOUCH SCREEN",       "DRIVE + AIM + FIRE (STICKS WIN)" },
+    };
+#else
+    static const Row kKeys[] = {
+        { "A D / ARROWS",       "MOVE" },
+        { "MOUSE",              "AIM;  LEFT CLICK / CTRL / J: FIRE" },
+        { "X / N / RIGHT CLICK","NUKE" },
+        { "P / ESC",            "PAUSE" },
+        { "TAB",                "MUSIC ON/OFF" },
+        { "ENTER / ESC",        "MENU: CONFIRM / BACK" },
+    };
+#endif
+    const float lineH = 22.0f, colKeys = 40.0f, colWhat = 270.0f;
+    float y = 88.0f;
+    auto section = [&](const char* name) {
+        FontRenderer::DrawString("Normal", name, colKeys, y, { 1.0f, 0.85f, 0.2f, 1.0f });
+        y += lineH;
+    };
+    auto row = [&](const Row& r) {
+        FontRenderer::DrawString("Normal", r.keys, colKeys + 10.0f, y, { 0.3f, 1.0f, 0.3f, 1.0f });
+        FontRenderer::DrawString("Normal", r.what, colWhat, y, Color4f::White());
+        y += lineH;
+    };
+#ifndef __vita__
+    section("KEYBOARD / MOUSE");
+    for (const Row& r : kKeys) row(r);
+    y += 8.0f;
+#endif
+    section("GAMEPAD");
+    for (const Row& r : kPad) row(r);
+#ifdef __vita__
+    y += 8.0f;
+    section("TOUCH");
+    for (const Row& r : kTouch) row(r);
+    // CROSS/CIRCLE confirm and back are only the Vita glyph names for SDL A/B.
+#endif
+    FontRenderer::DrawString("Normal", "ANY BUTTON OR TAP: BACK", SCREEN_WIDTH * 0.5f, 448.0f, { 0.6f, 0.6f, 0.6f, 1.0f }, 1.0f, ALIGN_CENTER);
 }
 
 void GameEngine::RenderGameOver() {

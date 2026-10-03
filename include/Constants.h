@@ -70,7 +70,9 @@ enum GameState {
     STATE_PAUSED,
     STATE_GAMEOVER,
     STATE_VICTORY,
-    STATE_DEBRIEF
+    STATE_DEBRIEF,
+    STATE_OPTIONS,
+    STATE_HELP
 };
 
 } // namespace HeavyWeapon

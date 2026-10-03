@@ -70,6 +70,7 @@ private:
     // Menu & UI State
     GameState mPrevState = STATE_BOOT;
     int mMenuSelection = 0;
+    int mOptionsSelection = 0;
     int mArmorySelection = 0;
     float mMenuGlowAnim = 0.0f;
 
@@ -81,6 +82,8 @@ private:
     void ToggleMusic();
     void UpdatePaused(float dt);
     void UpdateGameOver(float dt);
+    void UpdateOptions();
+    void UpdateHelp();
 
     // Internal state renders
     void RenderTitle();
@@ -91,6 +94,8 @@ private:
     void RenderArmory();
     void RenderPaused();
     void RenderGameOver();
+    void RenderOptions();
+    void RenderHelp();
 
     void StartLevel(int levelIndex);
     void ApplyBoardInput();

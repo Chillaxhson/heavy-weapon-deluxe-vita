@@ -11,4 +11,7 @@ class Craft;
 // the final boss instead of the helicopter).
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission);
 
+// Sub-folder of Images/ holding the sprites of the mission's boss, for preloading.
+const char* BossSpriteFolder(int mission);
+
 } // namespace HeavyWeapon

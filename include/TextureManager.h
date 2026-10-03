@@ -44,6 +44,9 @@ public:
     // `progress(done, total)` is called after each texture (may be empty).
     static int PreloadAll(const std::function<void(int, int)>& progress = {});
 
+    // Loads every image in Images/<subFolder> (boss sprite sets). Already-cached ones are free.
+    static void PreloadFolder(const std::string& subFolder);
+
     // Query dimensions and grid layout
     static void GetCelInfo(const std::string& name, int& outCols, int& outRows);
 

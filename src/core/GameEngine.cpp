@@ -2,6 +2,7 @@
 #include "Vfs.h"
 #include "InputManager.h"
 #include "Perf.h"
+#include "game/Bosses.h"
 #include <cmath>
 #include <iostream>
 #include <algorithm>
@@ -284,6 +285,8 @@ void GameEngine::StartLevel(int levelIndex) {
     if (levelIndex < (int)mLevelAnims.size()) anims = mLevelAnims[levelIndex];
     WorldRenderer::SetTheme(theme, anims);
     PERF_LAP(perfLap, "StartLevel SetTheme");
+    TextureManager::PreloadFolder(BossSpriteFolder(levelIndex));   // this mission's boss, not all of them
+    PERF_LAP(perfLap, "StartLevel boss sprites");
 
     std::vector<CraftDef> byId(mCraftDefs.size() + 1);
     for (const auto& kv : mCraftDefs) {

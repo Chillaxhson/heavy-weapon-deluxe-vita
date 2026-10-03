@@ -1893,6 +1893,13 @@ struct FinalBoss : Craft {
 
 } // namespace
 
+const char* BossSpriteFolder(int mission) {
+    static const char* kFolders[9] = { "hugecopter", "battleship", "Rainer", "wrecker", "ape",
+                                       "Eye", "Head", "Worm", "robot" };
+    if (mission == 18) return "FinalBoss";
+    return kFolders[((mission % 9) + 9) % 9];
+}
+
 std::unique_ptr<Craft> CreateBoss(Board& b, int mission) {
     switch (mission % 9) {
         case 0:

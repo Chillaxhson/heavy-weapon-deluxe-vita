@@ -430,6 +430,17 @@ static bool IsPreloadSkipped(const std::string& n) {
     return n == "map";
 }
 
+void TextureManager::PreloadFolder(const std::string& sub) {
+    PERF_BEGIN(t0);
+    int n = 0;
+    for (const std::string& file : Vfs::ListDirectory("Images/" + sub)) {
+        std::string base = StripImageExtension(file);
+        if (base == file || base.empty() || base[0] == '_' || base.back() == '_') continue;
+        if (LoadImpl("Images/" + sub + "/" + base, true)) ++n;
+    }
+    PERF_LOG("preload folder %s: %d textures, %.1f ms", sub.c_str(), n, PERF_NOW() - t0);
+}
+
 int TextureManager::PreloadAll(const std::function<void(int, int)>& progress) {
     static bool sDone = false;
     if (sDone) return 0;
@@ -440,19 +451,6 @@ int TextureManager::PreloadAll(const std::function<void(int, int)>& progress) {
     for (const auto& meta : sImageMetaTable) {
         if (IsPreloadSkipped(meta.name)) continue;
         names.push_back(meta.name);
-    }
-    // Boss sprites live in sub-folders of Images/ (ape, battleship, robot, worm...) and are
-    // not in the image table. Every sub-folder except the per-theme Anims/Backgrounds ones.
-    for (const std::string& sub : Vfs::ListDirectory("Images")) {
-        if (sub.find('.') != std::string::npos) continue;
-        std::string lowerSub = sub;
-        std::transform(lowerSub.begin(), lowerSub.end(), lowerSub.begin(), ::tolower);
-        if (lowerSub == "anims" || lowerSub == "backgrounds") continue;
-        for (const std::string& file : Vfs::ListDirectory("Images/" + sub)) {
-            std::string base = StripImageExtension(file);
-            if (base == file || base.empty() || base[0] == '_' || base.back() == '_') continue;
-            names.push_back("Images/" + sub + "/" + base);
-        }
     }
     int loaded = 0, done = 0;
     const int total = (int)names.size();

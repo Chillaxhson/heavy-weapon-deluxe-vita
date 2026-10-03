@@ -1,6 +1,7 @@
 #include "InputManager.h"
 #include "Constants.h"
 #include "Renderer.h"
+#include "core/Perf.h"
 #include <cmath>
 #include <algorithm>
 
@@ -22,6 +23,34 @@ bool InputManager::sPrevRight = false;
 bool InputManager::sPrevAltFire = false;
 bool InputManager::sPrevTouch = false;
 bool InputManager::sMouseRightPulse = false;
+bool InputManager::sMouseDown = false;
+SDL_FingerID InputManager::sFingers[InputManager::kMaxFingers];
+int InputManager::sNumFingers = 0;
+Uint32 InputManager::sLastFingerEventMs = 0;
+bool InputManager::sStuckLogged = false;
+
+// Only the front (direct) touch panel counts. On Vita SDL registers the rear touchpad as a second,
+// indirect touch device; its events must never drive the tank.
+static bool IsFrontTouch(SDL_TouchID id) {
+    SDL_TouchDeviceType t = SDL_GetTouchDeviceType(id);
+    return t == SDL_TOUCH_DEVICE_DIRECT || t == SDL_TOUCH_DEVICE_INVALID;
+}
+
+static SDL_TouchID FrontTouchDevice(bool& found) {
+    int n = SDL_GetNumTouchDevices();
+    for (int i = 0; i < n; ++i) {
+        SDL_TouchID id = SDL_GetTouchDevice(i);
+        if (SDL_GetTouchDeviceType(id) == SDL_TOUCH_DEVICE_DIRECT) { found = true; return id; }
+    }
+    found = false;
+    return 0;
+}
+
+void InputManager::ResetTouch() {
+    sNumFingers = 0;
+    sState.fingerDown = false;
+    sState.touchDown = sMouseDown;
+}
 
 void InputManager::Init() {
     SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
@@ -67,15 +96,23 @@ void InputManager::Update() {
             SDL_GameControllerClose(sController);
             sController = nullptr;
         } else if (event.type == SDL_FINGERDOWN || event.type == SDL_FINGERMOTION) {
+            if (!IsFrontTouch(event.tfinger.touchId)) continue;
+            sLastFingerEventMs = SDL_GetTicks();
             // Finger coordinates are normalised over the touch panel, which covers the display.
             Renderer::DisplayToLogical(event.tfinger.x * DISPLAY_WIDTH, event.tfinger.y * DISPLAY_HEIGHT,
                                        sState.touchX, sState.touchY);
             if (event.type == SDL_FINGERDOWN) {
-                sState.touchDown = true;
+                bool known = false;
+                for (int i = 0; i < sNumFingers; ++i) known |= (sFingers[i] == event.tfinger.fingerId);
+                if (!known && sNumFingers < kMaxFingers) sFingers[sNumFingers++] = event.tfinger.fingerId;
                 sState.touchPressed = true;
             }
         } else if (event.type == SDL_FINGERUP) {
-            sState.touchDown = false;
+            if (!IsFrontTouch(event.tfinger.touchId)) continue;
+            sLastFingerEventMs = SDL_GetTicks();
+            for (int i = 0; i < sNumFingers; ++i) {
+                if (sFingers[i] == event.tfinger.fingerId) { sFingers[i] = sFingers[--sNumFingers]; break; }
+            }
             sState.touchReleased = true;
 #ifndef __vita__
         } else if (event.type == SDL_MOUSEMOTION && event.motion.which != SDL_TOUCH_MOUSEID) {
@@ -85,17 +122,34 @@ void InputManager::Update() {
             Renderer::WindowToLogical((float)event.button.x, (float)event.button.y, sState.touchX, sState.touchY);
             sState.pointerAim = true;
             if (event.button.button == SDL_BUTTON_LEFT) {
-                sState.touchDown = true;
+                sMouseDown = true;
                 sState.touchPressed = true;
             } else if (event.button.button == SDL_BUTTON_RIGHT) {
                 sMouseRightPulse = true;
             }
         } else if (event.type == SDL_MOUSEBUTTONUP && event.button.which != SDL_TOUCH_MOUSEID &&
                    event.button.button == SDL_BUTTON_LEFT) {
-            sState.touchDown = false;
+            sMouseDown = false;
             sState.touchReleased = true;
 #endif
         }
+    }
+
+    // Self-heal: if SDL reports no fingers on the front panel, any tracked ids are stale (lost UP).
+    if (sNumFingers > 0) {
+        bool found = false;
+        SDL_TouchID front = FrontTouchDevice(found);
+        if (found && SDL_GetNumTouchFingers(front) == 0) sNumFingers = 0;
+    }
+    sState.fingerDown = sNumFingers > 0;
+    sState.touchDown = sState.fingerDown || sMouseDown;
+
+    // Regression canary (HW_PERF builds): a finger held with no events at all for 10 s.
+    if (!sState.fingerDown) {
+        sStuckLogged = false;
+    } else if (!sStuckLogged && SDL_GetTicks() - sLastFingerEventMs > 10000) {
+        sStuckLogged = true;
+        PERF_LOG("touchDown stuck >10 s with no finger events (fingers=%d)", sNumFingers);
     }
 
     float moveX = 0.0f;

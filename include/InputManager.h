@@ -37,7 +37,8 @@ struct InputState {
     // Touch, or the mouse on desktop. Coordinates are in logical 640x480 space.
     // pointerAim is set while a mouse is aiming the turret (hover, like the PC game).
     bool pointerAim = false;
-    bool touchDown = false;
+    bool touchDown = false;     // any front-panel finger down (or the left mouse button on desktop)
+    bool fingerDown = false;    // touchDown caused by a real finger (not the mouse)
     bool touchPressed = false;
     bool touchReleased = false;
     float touchX = 0.0f;
@@ -51,6 +52,10 @@ public:
     static void Update();
 
     static const InputState& GetState() { return sState; }
+
+    // Forget all tracked fingers (call on state changes). A finger still held down is ignored
+    // until it lifts and touches again.
+    static void ResetTouch();
 
 private:
     static InputState sState;
@@ -69,6 +74,13 @@ private:
     static bool sPrevAltFire;
     static bool sPrevTouch;
     static bool sMouseRightPulse;
+    static bool sMouseDown;
+    // Active front-panel finger ids (SDL_FingerID); touchDown is derived from this set.
+    static const int kMaxFingers = 10;
+    static SDL_FingerID sFingers[kMaxFingers];
+    static int sNumFingers;
+    static Uint32 sLastFingerEventMs;
+    static bool sStuckLogged;
 };
 
 } // namespace HeavyWeapon

@@ -207,6 +207,11 @@ void GameEngine::Update(float dt) {
 
     mMenuGlowAnim += 3.0f * dt;
 
+    if (mState != mPrevState) {   // pause, game over, new level...: drop any stale finger tracking
+        InputManager::ResetTouch();
+        mPrevState = mState;
+    }
+
     switch (mState) {
         case STATE_TITLE:          UpdateTitle(dt); break;
         case STATE_MISSION_SELECT: UpdateMissionSelect(dt); break;
@@ -349,6 +354,7 @@ void GameEngine::StartLevel(int levelIndex) {
     PERF_LAP(perfLap, "StartLevel PlayMusic");
     AudioSystem::PlaySoundId(SND_V_GETREADY);
     mState = STATE_PLAYING;
+    InputManager::ResetTouch();
     PERF_LAP(perfTotal, "StartLevel TOTAL");
 }
 
@@ -360,7 +366,11 @@ void GameEngine::ApplyBoardInput() {
     Board& board = *mBoard;
 
     bool stickAim = std::abs(input.aimAxisX) > 0.0f || std::abs(input.aimAxisY) > 0.0f;
-    if (input.touchDown || (input.pointerAim && !stickAim)) {
+    // A gamepad stick/D-pad always wins over a finger on the screen (an accidental touch must not
+    // hijack the tank); touch can still fire.
+    bool fingerSteers = input.fingerDown && !stickAim && std::abs(input.moveAxisX) == 0.0f;
+    bool mouseSteers = (input.touchDown && !input.fingerDown) || (input.pointerAim && !stickAim);
+    if (fingerSteers || mouseSteers) {
         board.SetTarget((int)input.touchX, (int)input.touchY);
         board.SetDriveOverride(false, 0.0f);
     } else {

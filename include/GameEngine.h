@@ -68,6 +68,7 @@ private:
     int mUpgradePoints = 0;
 
     // Menu & UI State
+    GameState mPrevState = STATE_BOOT;
     int mMenuSelection = 0;
     int mArmorySelection = 0;
     float mMenuGlowAnim = 0.0f;

@@ -41,3 +41,4 @@ Thumbs.db
 # Reverse-engineering workspace (contains extracted commercial binary)
 /re/
 /shots/
+perf.log

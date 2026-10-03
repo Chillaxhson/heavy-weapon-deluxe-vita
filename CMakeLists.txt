@@ -6,7 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+
+option(HW_PERF "Enable the perf.log profiler (src/core/Perf.h)" OFF)
 
 set(SOURCES
     src/main.cpp
@@ -19,6 +22,7 @@ set(SOURCES
     src/render/FontRenderer.cpp
     src/render/WorldRenderer.cpp
     src/core/GameEngine.cpp
+    src/core/Perf.cpp
     src/game/Gfx.cpp
     src/game/Board.cpp
     src/game/Crafts.cpp
@@ -41,6 +45,9 @@ if(NOT DEFINED ENV{VITASDK} AND NOT DEFINED VITASDK)
     target_include_directories(heavyweapon PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/tinyxml2)
     target_compile_definitions(heavyweapon PRIVATE GL_GLEXT_PROTOTYPES)
     target_compile_options(heavyweapon PRIVATE -Wall -Wextra)
+    if(HW_PERF)
+        target_compile_definitions(heavyweapon PRIVATE HW_PERF)
+    endif()
     target_link_libraries(heavyweapon PRIVATE PkgConfig::SDL2 OpenGL::GL)
     return()
 endif()
@@ -62,6 +69,9 @@ add_executable(heavyweapon ${SOURCES})
 target_compile_definitions(heavyweapon PRIVATE
     __vita__
 )
+if(HW_PERF)
+    target_compile_definitions(heavyweapon PRIVATE HW_PERF)
+endif()
 
 target_link_libraries(heavyweapon
     -Wl,--start-group

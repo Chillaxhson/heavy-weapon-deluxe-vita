@@ -8,9 +8,14 @@
 #   tools/desktop/hw.sh shot OUT.png [args]   headless: render a frame to OUT.png
 #   tools/desktop/hw.sh vpk                   build the Vita VPK into build/
 #
+# HW_PERF=1 tools/desktop/hw.sh build|vpk    enable the perf.log profiler (src/core/Perf.h)
+#
 # Game args: --state title|map|play|armory  --level N  --frames N  --stretch  --scale N
 # Example:   tools/desktop/hw.sh shot shots/play.png --state play --level 0 --frames 240
 set -euo pipefail
+
+PERF_FLAG=OFF
+[[ "${HW_PERF:-0}" == "1" || "${HW_PERF:-}" == "ON" ]] && PERF_FLAG=ON
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE=hwd-desktop
@@ -34,7 +39,7 @@ case "$cmd" in
         podman build -t "$IMAGE" -f "$REPO/tools/desktop/Containerfile" "$REPO/tools/desktop"
         ;;
     build)
-        run_in "$IMAGE" bash -c "cmake -S . -B build-desktop -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null && cmake --build build-desktop -j\$(nproc)"
+        run_in "$IMAGE" bash -c "cmake -S . -B build-desktop -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHW_PERF=$PERF_FLAG >/dev/null && cmake --build build-desktop -j\$(nproc)"
         ;;
     run)
         uid="$(id -u)"
@@ -61,10 +66,10 @@ case "$cmd" in
             _ --frames 120 "$@" --screenshot "$out"
         ;;
     vpk)
-        run_as_root docker.io/vitasdk/vitasdk:latest bash -c "cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=\$VITASDK/share/vita.toolchain.cmake >/dev/null && cmake --build build -j\$(nproc)"
+        run_as_root docker.io/vitasdk/vitasdk:latest bash -c "cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=\$VITASDK/share/vita.toolchain.cmake -DHW_PERF=$PERF_FLAG >/dev/null && cmake --build build -j\$(nproc)"
         ;;
     *)
-        sed -n '2,15p' "$0"
+        sed -n '2,17p' "$0"
         exit 1
         ;;
 esac

@@ -1,5 +1,6 @@
 #include "TextureManager.h"
 #include "Vfs.h"
+#include "core/Perf.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <iostream>
@@ -348,6 +349,7 @@ Texture* TextureManager::Load(const std::string& relativePath) {
     if (it != sTextures.end()) {
         return it->second.id ? &it->second : nullptr;
     }
+    PERF_SCOPE("TextureManager::Load miss " + key);
 
     int cols = 1, rows = 1;
     GetCelInfo(key, cols, rows);
@@ -373,6 +375,7 @@ Texture* TextureManager::Load(const std::string& relativePath) {
     bool keepAlpha = key.rfind("backgrounds/", 0) != 0;
     Texture tex = LoadFromFiles(Vfs::Resolve(colorPath), maskPath, cols, rows, keepAlpha);
     sTextures[key] = tex;
+    if (tex.id) PERF_TEXTURE_LOADED(key, tex.width, tex.height);
     return tex.id ? &sTextures[key] : nullptr;
 }
 

@@ -1,6 +1,7 @@
 #include "GameEngine.h"
 #include "Vfs.h"
 #include "InputManager.h"
+#include "Perf.h"
 #include <cmath>
 #include <iostream>
 #include <algorithm>
@@ -93,8 +94,10 @@ void GameEngine::Run() {
         lastTicks = currentTicks;
         if (fixedRun) dt = FIXED_DT;
 
+        PERF_BEGIN(perfFrame);
         Update(dt);
         Render();
+        if (mState == STATE_PLAYING && mBoard) PERF_END_FRAME(PERF_NOW() - perfFrame, mBoard->RespawnTimer(), mApp.tick);
 
         if (InputManager::GetState().quitRequested) mRunning = false;
         if (fixedRun && ++frame >= mOpts.maxFrames) {
@@ -219,6 +222,8 @@ void GameEngine::UpdateMissionSelect(float dt) {
 }
 
 void GameEngine::StartLevel(int levelIndex) {
+    PERF_BEGIN(perfTotal);
+    PERF_BEGIN(perfLap);
     mCurrentLevelIndex = levelIndex;
     mApp.mission = levelIndex;
     mApp.lives = 3;   // every mission starts with three tanks (0x403e20)
@@ -230,6 +235,7 @@ void GameEngine::StartLevel(int levelIndex) {
     std::vector<AnimDef> anims;
     if (levelIndex < (int)mLevelAnims.size()) anims = mLevelAnims[levelIndex];
     WorldRenderer::SetTheme(theme, anims);
+    PERF_LAP(perfLap, "StartLevel SetTheme");
 
     std::vector<CraftDef> byId(mCraftDefs.size() + 1);
     for (const auto& kv : mCraftDefs) {
@@ -237,10 +243,13 @@ void GameEngine::StartLevel(int levelIndex) {
     }
     mBoard = std::make_unique<Board>(mApp, level, byId, false);
     mBoard->SetBossDefs(&mBossDefs);
+    PERF_LAP(perfLap, "StartLevel Board ctor");
 
     AudioSystem::PlayMusic("Music/AtomicTank.mo3");
+    PERF_LAP(perfLap, "StartLevel PlayMusic");
     AudioSystem::PlaySoundId(SND_V_GETREADY);
     mState = STATE_PLAYING;
+    PERF_LAP(perfTotal, "StartLevel TOTAL");
 }
 
 // Feeds input to the board the way the original's mouse handlers do: the cursor is the
@@ -285,7 +294,9 @@ void GameEngine::UpdatePlaying(float dt) {
     while (mTickAccum >= 1.0f) {
         mTickAccum -= 1.0f;
         ApplyBoardInput();
+        PERF_BEGIN(perfTick);
         mBoard->Update();
+        PERF_BOARD_TICK(PERF_NOW() - perfTick);
         AudioSystem::Tick();
     }
 

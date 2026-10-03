@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <algorithm>
+#include "core/Perf.h"
 
 namespace HeavyWeapon {
 
@@ -87,6 +88,7 @@ void Vfs::Init(const std::string& customBasePath) {
 }
 
 std::string Vfs::Resolve(const std::string& relativePath) {
+    PERF_SCOPE_MIN("Vfs::Resolve " + relativePath, 5.0);
     std::string clean = NormalizeSlashes(relativePath);
     if (!clean.empty() && clean[0] == '/') {
         clean = clean.substr(1);

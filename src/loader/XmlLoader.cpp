@@ -165,6 +165,32 @@ bool XmlLoader::LoadWaves(const std::string& path, std::vector<LevelDef>& inOutL
     return true;
 }
 
+bool XmlLoader::LoadSurvival(const std::string& path, std::vector<LevelDef>& outTiers) {
+    std::string raw = Vfs::ReadTextFile(path);
+    if (raw.empty()) return false;
+    XMLDocument doc;
+    if (doc.Parse(PrepareXml(raw).c_str()) != XML_SUCCESS) return false;
+    XMLElement* root = doc.FirstChildElement("Root");
+    if (!root) return false;
+    outTiers.clear();
+    for (XMLElement* lvl = root->FirstChildElement("Level"); lvl; lvl = lvl->NextSiblingElement("Level")) {
+        LevelDef def;
+        for (XMLElement* wElem = lvl->FirstChildElement("Wave"); wElem; wElem = wElem->NextSiblingElement("Wave")) {
+            WaveDef wave;
+            wElem->QueryIntAttribute("length", &wave.length);
+            for (XMLElement* c = wElem->FirstChildElement("Craft"); c; c = c->NextSiblingElement("Craft")) {
+                const char* id = c->Attribute("id");
+                int qty = 1;
+                c->QueryIntAttribute("qty", &qty);
+                if (id) wave.craftList.push_back({ id, qty });
+            }
+            def.waves.push_back(wave);
+        }
+        outTiers.push_back(std::move(def));
+    }
+    return !outTiers.empty();
+}
+
 bool XmlLoader::LoadBosses(const std::string& path, std::unordered_map<std::string, BossDef>& outBosses) {
     std::string raw = Vfs::ReadTextFile(path);
     if (raw.empty()) {

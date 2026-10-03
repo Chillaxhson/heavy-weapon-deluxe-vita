@@ -18,7 +18,7 @@ namespace HeavyWeapon {
 
 // Command-line options, used mainly by the desktop build for testing.
 struct LaunchOptions {
-    std::string startState;      // "", "title", "map", "play", "armory"
+    std::string startState;      // "", "title", "map", "play", "survival", "armory"
     int level = 0;               // mission index for map/play
     int maxFrames = -1;          // > 0: run exactly this many fixed-timestep frames, then quit
     std::string screenshotPath;  // saved after the final frame
@@ -50,6 +50,7 @@ private:
     // Game data loaded from XML
     std::unordered_map<std::string, CraftDef> mCraftDefs;
     std::vector<LevelDef> mLevels;
+    std::vector<std::vector<LevelDef>> mSurvivalSets;   // survival0..9.xml, each a list of tiers
     std::unordered_map<std::string, BossDef> mBossDefs;
     std::vector<std::vector<AnimDef>> mLevelAnims;
 
@@ -66,6 +67,9 @@ private:
         int timer = 0;
     } mDebrief;
     int mUpgradePoints = 0;
+    bool mSurvivalMode = false;
+    int mSurvivalTime = 0, mBestSurvival = 0;   // seconds; best is persisted in settings.ini
+    bool mSurvivalNewBest = false;
 
     // Menu & UI State
     GameState mPrevState = STATE_BOOT;
@@ -97,7 +101,7 @@ private:
     void RenderOptions();
     void RenderHelp();
 
-    void StartLevel(int levelIndex);
+    void StartLevel(int levelIndex, bool survival = false);
     void ApplyBoardInput();
 };
 

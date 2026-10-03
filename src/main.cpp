@@ -13,7 +13,7 @@
 static void PrintUsage() {
     std::cout <<
         "Usage: heavyweapon [options]\n"
-        "  --state <title|map|play|armory|options|help>  start on this screen\n"
+        "  --state <title|map|play|survival|armory|options|help>  start on this screen\n"
         "  --level <n>                      mission index (0-based) for map/play\n"
         "  --frames <n>                     quit after n frames (fixed 60 Hz timestep)\n"
         "  --screenshot <file.png>          save the final 640x480 frame (needs --frames)\n"

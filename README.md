@@ -17,7 +17,8 @@ A native **PlayStation Vita** source port of PopCap Games' classic arcade side-s
   * **R1 / Cross (✕)**: Fire Heavy Cannon.
   * **L1 / Triangle (△)**: Nuclear Bomb (Nuke).
   * **Touchscreen**: Tap to navigate menus, select missions, and purchase Armory upgrades.
-* **Campaign** (Survival mode is not implemented yet):
+* **Survival mode**: endless waves from `data/survival0-9.xml` (one set picked per run, 20 tiers that step up every minute), scored by time survived. You get a single tank (one life), and supply drops (crates, power-up helicopters, nukes, shields) come twice as often as in the campaign for a better experience. The best time is saved in `settings.ini`.
+* **Campaign**:
   * All 19 missions loaded from `data/levels.xml`, with the original bosses.
   * Complete wave scheduling loaded from `data/waves.xml`.
   * All 20+ enemy aircraft, ground vehicles, and multi-part bosses loaded from `data/craft.xml` and `data/bosses.xml`.

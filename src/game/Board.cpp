@@ -51,6 +51,13 @@ const CraftDef& Board::CraftStats(int type) const {
     return (type > 0 && type < (int)mCraftById.size()) ? mCraftById[type] : kNone;
 }
 
+const LevelDef* Board::WaveLevel() const {
+    if (mSurvival && mSurvLevels && !mSurvLevels->empty()) {
+        return &(*mSurvLevels)[std::min((size_t)Tier(), mSurvLevels->size() - 1)];
+    }
+    return mLevel;
+}
+
 int Board::Tier() const {
     return mSurvival ? mProgress / 12000 : mApp.mission;
 }
@@ -68,7 +75,10 @@ void Board::Update() {
         // Level progress halts at the end of the level until the boss is beaten;
         // survival mode runs at double rate and never ends.
         if (mProgress != mLength || mSurvival) ++mProgress;
-        if (mSurvival) ++mProgress;
+        if (mSurvival) {
+            ++mProgress;
+            mApp.score = mProgress / 20;   // survival scores by time: 10 points per second
+        }
     } else {
         // Deploy countdown (+0x80): 300 ticks at the start of a level, 400 after a death.
         // lives counts the tanks in reserve; deploying one uses a life.
@@ -255,7 +265,7 @@ void Board::UpdateTank() {
         mMouseY = 320;
     }
 
-    if (mShieldFlash > 0.0) mShieldCooldown = mSurvival ? 1000 : mLength / 8;
+    if (mShieldFlash > 0.0) mShieldCooldown = mSurvival ? 500 : mLength / 8;
     // Megalaser mode drains one tick per tick, warning near the end (0x410860).
     if (mMegaTime != 0) {
         --mMegaTime;
@@ -808,8 +818,8 @@ void Board::UpdateSpawner() {
     if (mNukeFlash != 0.0) return;
 
     // Now and then a friendly helicopter brings a power-up.
-    if (Rand() % 150 == 0 && mPupTimer == 0 && mFriendlies == 0 && mMegaTime == 0 && mPowerUps.empty()) {
-        mPupTimer = mSurvival ? 600 : 1000;
+    if (Rand() % (mSurvival ? 75 : 150) == 0 && mPupTimer == 0 && mFriendlies == 0 && mMegaTime == 0 && mPowerUps.empty()) {
+        mPupTimer = mSurvival ? 300 : 1000;
         int type = PickPowerUp();
         if (type >= 0) mCrafts.push_back(CreatePupCopter(*this, type));
     }
@@ -830,7 +840,8 @@ void Board::UpdateSpawner() {
     if (mWaveDelay == 0) {
         // A random wave of the level; mission 1 always opens with its first wave.
         int index = 0;
-        int count = mLevel ? (int)mLevel->waves.size() : 0;
+        const LevelDef* src = WaveLevel();
+        int count = src ? (int)src->waves.size() : 0;
         if (!(mApp.mission == 0 && mProgress < 2000) && count > 0) index = Rand() % count;
         StartWave(Tier(), index);
     } else {
@@ -841,9 +852,10 @@ void Board::UpdateSpawner() {
 }
 
 void Board::StartWave(int tier, int index) {
-    if (!mLevel || index >= (int)mLevel->waves.size()) return;
+    const LevelDef* src = WaveLevel();
+    if (!src || index >= (int)src->waves.size()) return;
     (void)tier;
-    const WaveDef& def = mLevel->waves[index];
+    const WaveDef& def = src->waves[index];
     Wave w;
     w.counter = w.length = def.length;
     for (const auto& e : def.craftList) {
@@ -1219,7 +1231,10 @@ void Board::DrawHUD() {
         double frac = mLength > 0 ? (double)std::min(mProgress, mLength) / mLength : 0.0;
         Gfx::DrawSprite(Img("mappointer"), (int)(119.0 * frac + 205.0), 11, true);
     } else {
-        FontRenderer::DrawStringBaseline("Computer", "SURVIVAL MODE", 209, 20, green);
+        int secs = SurvivalSeconds();
+        char buf[32];
+        snprintf(buf, sizeof(buf), "SURVIVAL  %d:%02d", secs / 60, secs % 60);
+        FontRenderer::DrawStringBaseline("Computer", buf, 209, 20, green);
     }
 }
 

@@ -4,6 +4,7 @@
 #include "Perf.h"
 #include "game/Bosses.h"
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <iostream>
 #include <algorithm>
@@ -35,9 +36,22 @@ static bool LoadMusicSetting() {
     return on;
 }
 
-static void SaveMusicSetting(bool on) {
+static int LoadBestSurvival() {
+    int best = 0;
+    if (FILE* f = fopen(kSettingsPath, "r")) {
+        char line[128];
+        while (fgets(line, sizeof(line), f)) {
+            int v;
+            if (sscanf(line, " survival_best = %d", &v) == 1) best = std::max(0, v);
+        }
+        fclose(f);
+    }
+    return best;
+}
+
+static void SaveSettings(bool music, int bestSurvival) {
     if (FILE* f = fopen(kSettingsPath, "w")) {
-        fprintf(f, "music=%d\n", on ? 1 : 0);
+        fprintf(f, "music=%d\nsurvival_best=%d\n", music ? 1 : 0, bestSurvival);
         fclose(f);
     }
 }
@@ -45,7 +59,7 @@ static void SaveMusicSetting(bool on) {
 void GameEngine::ToggleMusic() {
     bool on = !AudioSystem::IsMusicEnabled();
     AudioSystem::SetMusicEnabled(on);
-    SaveMusicSetting(on);
+    SaveSettings(on, mBestSurvival);
     AudioSystem::PlaySound("buttondown", 0.5f);
 }
 
@@ -129,6 +143,7 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
     FontRenderer::Init();
     AudioSystem::Init();
     AudioSystem::SetMusicEnabled(LoadMusicSetting());
+    mBestSurvival = LoadBestSurvival();
     InputManager::Init();
 
     // Load game definitions
@@ -136,6 +151,12 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
     XmlLoader::LoadLevels("data/levels.xml", mLevels);
     XmlLoader::LoadWaves("data/waves.xml", mLevels);
     XmlLoader::LoadBosses("data/bosses.xml", mBossDefs);
+    for (int i = 0; i < 10; ++i) {
+        std::vector<LevelDef> tiers;
+        if (XmlLoader::LoadSurvival("data/survival" + std::to_string(i) + ".xml", tiers)) {
+            mSurvivalSets.push_back(std::move(tiers));
+        }
+    }
     XmlLoader::LoadAnims("Images/Anims/Anims.xml", mLevelAnims);
 
     PreloadAssetsBehindFrame("mainmenu");
@@ -153,6 +174,9 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
         if (opts.startProgress != -1) {
             mBoard->SetProgress(opts.startProgress >= 0 ? opts.startProgress : mBoard->Length() + opts.startProgress);
         }
+    } else if (opts.startState == "survival") {
+        StartLevel(mCurrentLevelIndex, true);
+        if (opts.startProgress > 0) mBoard->SetProgress(opts.startProgress);
     } else if (opts.startState == "options") {
         mState = STATE_OPTIONS;
     } else if (opts.startState == "help") {
@@ -301,10 +325,12 @@ void GameEngine::UpdateTitle(float dt) {
             mState = STATE_MISSION_SELECT;
             break;
         case MENU_SURVIVAL:
-            // Survival mode is not implemented yet; start mission 1 as a placeholder.
-            mCurrentLevelIndex = 0;
+            if (mSurvivalSets.empty()) {
+                AudioSystem::PlaySound("denied", 0.5f);   // survival*.xml missing
+                break;
+            }
             mApp = AppState();
-            StartLevel(0);
+            StartLevel(std::rand() % std::max(1, (int)mLevels.size()), true);
             break;
         case MENU_OPTIONS:
             mOptionsSelection = 0;
@@ -381,12 +407,13 @@ void GameEngine::UpdateMissionSelect(float dt) {
     }
 }
 
-void GameEngine::StartLevel(int levelIndex) {
+void GameEngine::StartLevel(int levelIndex, bool survival) {
     PERF_BEGIN(perfTotal);
     PERF_BEGIN(perfLap);
     mCurrentLevelIndex = levelIndex;
-    mApp.mission = levelIndex;
-    mApp.lives = 3;   // every mission starts with three tanks (0x403e20)
+    mApp.mission = survival ? 0 : levelIndex;   // survival borrows levelIndex's backdrop only
+    mSurvivalMode = survival;
+    mApp.lives = survival ? 1 : 3;   // three tanks per mission (0x403e20); survival gives a single one
     mTickAccum = 0.0f;
     mLevelEndTimer = 0;
 
@@ -397,14 +424,15 @@ void GameEngine::StartLevel(int levelIndex) {
     if (levelIndex < (int)mLevelAnims.size()) anims = mLevelAnims[levelIndex];
     WorldRenderer::SetTheme(theme, anims);
     PERF_LAP(perfLap, "StartLevel SetTheme");
-    TextureManager::PreloadFolder(BossSpriteFolder(levelIndex));   // this mission's boss, not all of them
+    if (!survival) TextureManager::PreloadFolder(BossSpriteFolder(levelIndex));   // this mission's boss, not all of them
     PERF_LAP(perfLap, "StartLevel boss sprites");
 
     std::vector<CraftDef> byId(mCraftDefs.size() + 1);
     for (const auto& kv : mCraftDefs) {
         if (kv.second.id > 0 && kv.second.id < (int)byId.size()) byId[kv.second.id] = kv.second;
     }
-    mBoard = std::make_unique<Board>(mApp, level, byId, false);
+    mBoard = std::make_unique<Board>(mApp, survival ? nullptr : level, byId, survival);
+    if (survival) mBoard->SetSurvivalLevels(&mSurvivalSets[std::rand() % mSurvivalSets.size()]);   // one of ten sets per run
     mBoard->SetBossDefs(&mBossDefs);
     PERF_LAP(perfLap, "StartLevel Board ctor");
 
@@ -469,6 +497,14 @@ void GameEngine::UpdatePlaying(float dt) {
     }
 
     if (mBoard->IsGameOver()) {
+        if (mSurvivalMode) {
+            mSurvivalTime = mBoard->SurvivalSeconds();
+            mSurvivalNewBest = mSurvivalTime > mBestSurvival;
+            if (mSurvivalNewBest) {
+                mBestSurvival = mSurvivalTime;
+                SaveSettings(AudioSystem::IsMusicEnabled(), mBestSurvival);
+            }
+        }
         AudioSystem::PlaySoundId(SND_V_GAMEOVER);
         mState = STATE_GAMEOVER;
         return;
@@ -878,10 +914,22 @@ void GameEngine::RenderHelp() {
 
 void GameEngine::RenderGameOver() {
     Renderer::DrawFillRect(0.0f, 0.0f, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT, { 0.3f, 0.04f, 0.04f, 0.82f });
-    FontRenderer::DrawString("RubberStampLET42", "MISSION FAILED", SCREEN_WIDTH * 0.5f, 190.0f, { 1.0f, 0.2f, 0.2f, 1.0f }, 1.0f, ALIGN_CENTER);
-
-    std::string scoreStr = "FINAL SCORE: " + std::to_string(mApp.score);
-    FontRenderer::DrawString("Normal", scoreStr, SCREEN_WIDTH * 0.5f, 275.0f, { 1.0f, 1.0f, 1.0f, 1.0f }, 1.2f, ALIGN_CENTER);
+    if (mSurvivalMode) {
+        char buf[64];
+        FontRenderer::DrawString("RubberStampLET42", "SURVIVAL OVER", SCREEN_WIDTH * 0.5f, 190.0f, { 1.0f, 0.2f, 0.2f, 1.0f }, 1.0f, ALIGN_CENTER);
+        snprintf(buf, sizeof(buf), "TIME SURVIVED: %d:%02d", mSurvivalTime / 60, mSurvivalTime % 60);
+        FontRenderer::DrawString("Normal", buf, SCREEN_WIDTH * 0.5f, 265.0f, { 1.0f, 1.0f, 1.0f, 1.0f }, 1.2f, ALIGN_CENTER);
+        if (mSurvivalNewBest) {
+            FontRenderer::DrawString("Computer", "NEW BEST TIME!", SCREEN_WIDTH * 0.5f, 310.0f, { 0.3f, 1.0f, 0.3f, 1.0f }, 1.0f, ALIGN_CENTER);
+        } else {
+            snprintf(buf, sizeof(buf), "BEST: %d:%02d", mBestSurvival / 60, mBestSurvival % 60);
+            FontRenderer::DrawString("Computer", buf, SCREEN_WIDTH * 0.5f, 310.0f, { 0.8f, 0.8f, 0.8f, 1.0f }, 1.0f, ALIGN_CENTER);
+        }
+    } else {
+        FontRenderer::DrawString("RubberStampLET42", "MISSION FAILED", SCREEN_WIDTH * 0.5f, 190.0f, { 1.0f, 0.2f, 0.2f, 1.0f }, 1.0f, ALIGN_CENTER);
+        std::string scoreStr = "FINAL SCORE: " + std::to_string(mApp.score);
+        FontRenderer::DrawString("Normal", scoreStr, SCREEN_WIDTH * 0.5f, 275.0f, { 1.0f, 1.0f, 1.0f, 1.0f }, 1.2f, ALIGN_CENTER);
+    }
 
     FontRenderer::DrawString("Computer", "PRESS CROSS TO RETURN TO HEADQUARTERS", SCREEN_WIDTH * 0.5f, 370.0f, { 1.0f, 0.9f, 0.2f, 1.0f }, 1.0f, ALIGN_CENTER);
 }

@@ -51,7 +51,11 @@ public:
     }
     int Progress() const { return mProgress; }
     int Length() const { return mLength; }
-    void SetProgress(int p) { mProgress = std::max(0, std::min(p, mLength)); }
+    void SetProgress(int p) { mProgress = std::max(0, mSurvival ? p : std::min(p, mLength)); }
+    // Survival draws its waves from survivalN.xml: one LevelDef per tier.
+    void SetSurvivalLevels(const std::vector<LevelDef>* levels) { mSurvLevels = levels; }
+    // Survival time in whole seconds (progress runs at 2 per tick, 100 ticks per second).
+    int SurvivalSeconds() const { return mProgress / 200; }
     double TankX() const { return mTankX; }
     int TankY() const { return mTankY; }
 
@@ -72,6 +76,7 @@ public:
     void SetRespawnTimer(int t) { mRespawn = t; }
     bool NearLevelEnd(int margin) const { return !mSurvival && mProgress >= mLength - margin; }
     bool Survival() const { return mSurvival; }
+    const LevelDef* WaveLevel() const;  // level whose waves are drawn from
     int Tier() const;               // mission index, or progress/12000 in survival
     double ScrollSpeed() const { return mScrollSpeed; }
     double TankTread() const { return mTread; }
@@ -171,6 +176,7 @@ private:
 
     AppState& mApp;
     const LevelDef* mLevel;
+    const std::vector<LevelDef>* mSurvLevels = nullptr;
     std::vector<CraftDef> mCraftById;
     bool mSurvival;
 

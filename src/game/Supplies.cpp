@@ -52,7 +52,7 @@ void Board::DropCrate(int x, int y) {
     // Drifts toward the middle of the screen as it falls.
     int drift = (int)(((long long)x * 0x77777777) >> 32) - x;
     mCrates.push_back({ (double)x, (double)y, (double)((drift >> 6) - (drift >> 31)), 0.0, (double)mMegaParts, false });
-    mCrateCooldown = 500;
+    mCrateCooldown = mSurvival ? 250 : 500;   // survival drops supplies twice as often
 }
 
 void Board::UpdateCrates() {
@@ -229,7 +229,7 @@ void Board::FireNuke() {
     }
     mWaves.clear();
     mWaveDelay = 0;
-    mNukeCooldown = mSurvival ? 1200 : mLength / 6;
+    mNukeCooldown = mSurvival ? 600 : mLength / 6;
     AudioSystem::PlaySoundId(SND_NUKEBLAST, 0);
     SpawnMushroom();
 }

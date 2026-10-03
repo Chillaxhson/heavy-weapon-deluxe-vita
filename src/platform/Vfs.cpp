@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <algorithm>
+#include <unordered_map>
 #include "core/Perf.h"
 
 namespace HeavyWeapon {
@@ -21,51 +22,54 @@ std::string Vfs::NormalizeSlashes(const std::string& path) {
     return res;
 }
 
-// Case-insensitive lookup of a single directory entry.
-static bool FindEntryCaseInsensitive(const std::string& dirPath, const std::string& name, std::string& outName) {
+static std::string ToLower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+    return s;
+}
+
+// One directory's contents, read once: lowercase name -> real name. Assets are read-only,
+// so listings are never invalidated.
+using DirListing = std::unordered_map<std::string, std::string>;
+
+static const DirListing& GetListing(const std::string& dirPath) {
+    static std::unordered_map<std::string, DirListing> sListings;
+    auto it = sListings.find(dirPath);
+    if (it != sListings.end()) return it->second;
+
+    DirListing& listing = sListings[dirPath];
     DIR* dir = opendir(dirPath.empty() ? "." : dirPath.c_str());
-    if (!dir) return false;
-
-    std::string lowerTarget = name;
-    std::transform(lowerTarget.begin(), lowerTarget.end(), lowerTarget.begin(), ::tolower);
-
-    bool found = false;
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != nullptr) {
-        std::string lowerEntry = entry->d_name;
-        std::transform(lowerEntry.begin(), lowerEntry.end(), lowerEntry.begin(), ::tolower);
-        if (lowerEntry == lowerTarget) {
-            outName = entry->d_name;
-            found = true;
-            break;
+    if (dir) {
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            std::string lower = ToLower(entry->d_name);
+#ifdef HW_PERF
+            if (listing.count(lower)) {
+                PERF_LOG("Vfs: case-collision in %s: %s vs %s", dirPath.c_str(), listing[lower].c_str(), entry->d_name);
+            }
+#endif
+            listing.emplace(lower, entry->d_name);
         }
+        closedir(dir);
     }
-    closedir(dir);
-    return found;
+    return listing;
 }
 
 // Case-insensitive path search for POSIX systems. PopCap data references paths with
 // arbitrary casing (e.g. "frigistan\yetti" for Images/Anims/Frigistan/yetti.png), so every
-// component after the search root is matched case-insensitively.
+// component after the search root is matched case-insensitively. Returns "" on a miss.
 static std::string FindCaseInsensitive(const std::string& root, const std::string& relative) {
-    std::string direct = root + relative;
-    if (access(direct.c_str(), F_OK) == 0) {
-        return direct;
-    }
-
     std::string current = root;
     size_t start = 0;
     while (start <= relative.size()) {
         size_t slash = relative.find('/', start);
         std::string part = relative.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
         if (!part.empty()) {
-            std::string match;
             std::string dirPath = current.empty() ? "." : current;
-            if (!dirPath.empty() && dirPath.back() == '/' && dirPath.size() > 1) dirPath.pop_back();
-            if (!FindEntryCaseInsensitive(dirPath, part, match)) {
-                return direct;
-            }
-            current += match;
+            if (dirPath.size() > 1 && dirPath.back() == '/') dirPath.pop_back();
+            const DirListing& listing = GetListing(dirPath);
+            auto it = listing.find(ToLower(part));
+            if (it == listing.end()) return std::string();
+            current += it->second;
             if (slash != std::string::npos) current += "/";
         }
         if (slash == std::string::npos) break;
@@ -74,7 +78,10 @@ static std::string FindCaseInsensitive(const std::string& root, const std::strin
     return current;
 }
 
+static std::unordered_map<std::string, std::string> sMemo;
+
 void Vfs::Init(const std::string& customBasePath) {
+    sMemo.clear();
     sSearchPaths.clear();
     if (!customBasePath.empty()) {
         sSearchPaths.push_back(customBasePath);
@@ -87,30 +94,53 @@ void Vfs::Init(const std::string& customBasePath) {
     sSearchPaths.push_back("./");
 }
 
-std::string Vfs::Resolve(const std::string& relativePath) {
-    PERF_SCOPE_MIN("Vfs::Resolve " + relativePath, 5.0);
-    std::string clean = NormalizeSlashes(relativePath);
-    if (!clean.empty() && clean[0] == '/') {
-        clean = clean.substr(1);
+// Memoized resolution. Returns the real path and sets found; on a miss returns the cleaned
+// input. relative path (lowercased) -> resolved path, or "" for a miss. Assets are
+// read-only so nothing is ever invalidated.
+static const std::string& ResolveMemo(const std::string& relativePath, const std::vector<std::string>& searchPaths,
+                                      bool& found, std::string& scratch) {
+    scratch = relativePath;
+    for (char& c : scratch) if (c == '\\') c = '/';
+    if (!scratch.empty() && scratch[0] == '/') scratch.erase(0, 1);
+
+    const std::string key = ToLower(scratch);
+    auto memo = sMemo.find(key);
+    if (memo != sMemo.end()) {
+        found = !memo->second.empty();
+        return found ? memo->second : scratch;
     }
 
-    for (const auto& base : sSearchPaths) {
+    PERF_SCOPE_MIN("Vfs::Resolve " + relativePath, 5.0);
+    std::string hit;
+    for (const auto& base : searchPaths) {
         std::string root = base;
         if (!root.empty() && root.back() != '/' && root.back() != ':') {
             root += "/";
         }
-
-        std::string resolved = FindCaseInsensitive(root, clean);
-        if (access(resolved.c_str(), F_OK) == 0) {
-            return resolved;
+        std::string resolved = FindCaseInsensitive(root, scratch);
+        if (!resolved.empty() && access(resolved.c_str(), F_OK) == 0) {
+            hit = resolved;
+            break;
         }
     }
-    return clean;
+    // Already a full path that exists as given (callers pass Resolve() results to Exists()).
+    if (hit.empty() && access(scratch.c_str(), F_OK) == 0) hit = scratch;
+    auto ins = sMemo.emplace(key, hit).first;
+    found = !hit.empty();
+    return found ? ins->second : scratch;
+}
+
+std::string Vfs::Resolve(const std::string& relativePath) {
+    bool found;
+    std::string scratch;
+    return ResolveMemo(relativePath, sSearchPaths, found, scratch);
 }
 
 bool Vfs::Exists(const std::string& relativePath) {
-    std::string res = Resolve(relativePath);
-    return access(res.c_str(), F_OK) == 0;
+    bool found;
+    std::string scratch;
+    ResolveMemo(relativePath, sSearchPaths, found, scratch);
+    return found;
 }
 
 std::string Vfs::ReadTextFile(const std::string& relativePath) {

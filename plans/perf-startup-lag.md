@@ -179,3 +179,52 @@ E. Step 4 (music toggle) from the original plan. NOTE: the game's only playable 
    is added. Do not attempt MO3/OGG conversion.
 Then build the instrumented VPK (HW_PERF=1) and report boot time lap numbers from a desktop run.
 Call opus-reviewer for the thread work (B) if anything is unclear.
+
+---
+# Addendum 3: Vita results of addendum 2, and next tasks — Opus
+
+Confirmed by the user on the Vita: sound OK, pause OK, music toggle OK, no crash, boot 8-9 s with a
+loading bar. Log: no loads during play; StartLevel 660 ms (backgrounds ~470 ms + boss folder 140 ms),
+accepted as is. Performance work is DONE; do not touch loading further.
+
+## Task F: music setting + keymap on the main menu
+The title has MENU_OPTIONS and MENU_HELP buttons (GameEngine.cpp ~237) that currently do nothing useful.
+- OPTIONS screen: shows "MUSIC: ON/OFF", toggled with confirm (A/X-button / Enter / tap on the line);
+  cancel (B/Esc/back button) returns to the title. Reuse `ToggleMusic()`. Keep the existing title-oval
+  and pause toggles working, but the oval on the title art may be removed if it looks redundant
+  (use judgement; the user prefers the menu option).
+- HELP screen (the keymap, read-only, not adjustable): list the controls actually implemented in
+  InputManager.cpp for the PLATFORM: Vita (left stick/D-pad move, right stick aim + auto-fire, A / R fire,
+  Y or L nuke, X megalaser, START pause, SELECT music, touch = aim/drive/fire) and, when built for
+  desktop, keyboard/mouse. Read the real bindings from the code, don't invent; if two buttons do the
+  same thing, say so. Use the existing fonts and a simple dark panel over the menu art. Cancel returns.
+- Desktop check: add `--state options` / `--state help` to the headless `shot` tool if easy and
+  screenshot both. Verify both are navigable with up/down/confirm/cancel and with touch.
+
+## Task G: sticky drift after an accidental touch (bug, user-reported)
+Report: driving with the sticks, the user accidentally touched the screen; the tank drifted toward
+the touched point and kept doing so. Tapping again cancelled it only briefly, then it came back.
+What the code does: `GameEngine::ApplyBoardInput` (GameEngine.cpp ~360) steers the tank to the touch
+point whenever `input.touchDown` is true, and ignores the stick; `touchDown` is a latched flag set on
+`SDL_FINGERDOWN` and cleared on ANY `SDL_FINGERUP` (InputManager.cpp ~70-80). It is never re-derived from
+the real finger state, and every finger id and touch device is treated as one.
+Likely causes (not proven): (1) a missed or mismatched FINGERUP, e.g. two fingers, or the rear touchpad
+(SDL exposes front and rear as separate touch devices), leaves `touchDown` stuck true, so the tank
+chases the last touch position; (2) the first finger up clears the flag while the other is still down,
+and a later motion/down event flips it back.
+Fix (do all):
+ - Ignore events whose `tfinger.touchId` is not the front panel (on Vita: SDL_GetTouchDevice(0); verify
+   index vs rear in the vita SDL build and ignore rear), and track active finger ids in a small set;
+   `touchDown` = set non-empty. Also re-derive each frame with `SDL_GetNumTouchFingers(frontDevice)`; if
+   it reports 0, clear the set and `touchDown` (self-healing, handles lost UP events).
+ - Gameplay priority: while any gamepad stick/D-pad movement input is active (|moveAxisX| > 0 or
+   aim stick active), touch must NOT steer or aim the tank; the stick wins. Touch only drives/aims when
+   no stick input. Firing by touch may stay.
+ - Clear `touchDown` and the set when the state changes (pause, game over, StartLevel).
+ - Add an HW_PERF-only log line when touchDown has been true > 10 s with no finger events, to catch
+   regressions.
+ Desktop: simulate by injecting SDL finger events in a tiny test if practical; else explain how you
+ verified by reasoning. Keep desktop mouse behaviour unchanged.
+
+Order: G first (bug), then F. One local commit each, no push. Build the VPK (HW_PERF=1 is fine) and
+report path/size. Call opus-reviewer if the Vita touch-device indices are unclear.

@@ -143,6 +143,18 @@ bool Vfs::Exists(const std::string& relativePath) {
     return found;
 }
 
+std::vector<std::string> Vfs::ListDirectory(const std::string& relativeDir) {
+    std::vector<std::string> names;
+    if (!Exists(relativeDir)) return names;
+    std::string dir = Resolve(relativeDir);
+    if (dir.size() > 1 && dir.back() == '/') dir.pop_back();
+    for (const auto& kv : GetListing(dir)) {
+        if (kv.second != "." && kv.second != "..") names.push_back(kv.second);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
 std::string Vfs::ReadTextFile(const std::string& relativePath) {
     std::string path = Resolve(relativePath);
     std::ifstream file(path, std::ios::in | std::ios::binary);

@@ -424,7 +424,7 @@ static bool IsPreloadSkipped(const std::string& n) {
     static const char* kPrefixes[] = {
         "title", "loading", "cursor_", "backgrounds/", "mainmenu", "mainsmallbtn", "mainbigbtn",
         "mainglow", "mission", "upgradebtns", "armory", "credits", "atmenu", "help", "mouse",
-        "advancebtn", "maprect", "mappointer"
+        "advancebtn", "maprect"
     };
     for (const char* p : kPrefixes) if (n.rfind(p, 0) == 0) return true;
     return n == "map";
@@ -439,6 +439,19 @@ int TextureManager::PreloadAll() {
     for (const auto& meta : sImageMetaTable) {
         if (IsPreloadSkipped(meta.name)) continue;
         if (LoadImpl(meta.name, true)) ++loaded;
+    }
+    // Boss sprites live in sub-folders of Images/ (ape, battleship, robot, worm...) and are
+    // not in the image table. Every sub-folder except the per-theme Anims/Backgrounds ones.
+    for (const std::string& sub : Vfs::ListDirectory("Images")) {
+        if (sub.find('.') != std::string::npos) continue;
+        std::string lowerSub = sub;
+        std::transform(lowerSub.begin(), lowerSub.end(), lowerSub.begin(), ::tolower);
+        if (lowerSub == "anims" || lowerSub == "backgrounds") continue;
+        for (const std::string& file : Vfs::ListDirectory("Images/" + sub)) {
+            std::string base = StripImageExtension(file);
+            if (base == file || base.empty() || base[0] == '_' || base.back() == '_') continue;
+            if (LoadImpl("Images/" + sub + "/" + base, true)) ++loaded;
+        }
     }
     PERF_LOG("preload: %d textures loaded, total %.1f ms", loaded, PERF_NOW() - t0);
     return loaded;

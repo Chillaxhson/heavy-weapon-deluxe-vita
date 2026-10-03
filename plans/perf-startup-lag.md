@@ -145,3 +145,37 @@ Conclusions / changes to the plan:
 5. Keep HW_PERF instrumentation; after step 2, re-run on the Vita and compare. Target: StartLevel
    < 300 ms after first run, zero `Load miss` lines after GET READY begins, no frame > 40 ms.
    Add a summary line at the end of preload: textures loaded, total ms.
+
+---
+# Addendum 2: results of step 2 on the Vita (log/perf.log) — Opus
+
+Result: gameplay lag is gone. Zero `Load miss` during play, worst Board::Update 2.7 ms, worst frame
+19 ms (one 756 ms frame = the very first play frame, GL warm-up; ignore). `StartLevel` 751 ms
+(SetTheme 736: backgrounds + anims). User: "incredibly fast now" but boot takes 10-15 s.
+
+Boot cost, measured: textures 8.5 s (162, avg 52 ms; ape/ape 609, explosion 496, largeinsignia 362,
+flakguns 253) + sounds 5.2 s (`Mix_LoadWAV` decodes OGG fully) = ~14 s with a frozen screen.
+
+Do next, in this order, one commit each (local, no push):
+A. Loading screen: while boot preload runs, draw a progress bar and "LOADING" over the mainmenu
+   image after each texture/sound (present a frame at most every ~100 ms so presenting is cheap).
+   The user must never see a frozen screen. Must not break `shot`/headless mode.
+B. Overlap the sounds with the textures: load all sounds on a worker thread (SDL_CreateThread) started at
+   boot while the main thread uploads textures (GL calls stay on the main thread). Guard `sSounds`
+   with a mutex; `PlaySoundId`/`PlaySound` must still lazy-load if the sound isn't ready yet; join the
+   thread before the first mission starts. Expected boot ~8.5 s -> the texture time alone. If
+   Mix_LoadWAV is not safe off-thread on the Vita build, drop B and say so; do not risk crashes.
+   Desktop check: run with valgrind-free sanity, `-fsanitize=thread` is optional.
+C. Boss sprites: stop preloading them all at boot (about 44 textures, ~2+ s). Preload only the
+   current mission's boss folder in `StartLevel` (mission % 9 picks the boss; the mapping is in
+   Board::SpawnBoss / Bosses.cpp, final boss on mission 18). Verify with a real-time HW_PERF run
+   that no `Load miss` appears after play begins on levels 5-8 and 17.
+D. Step 3 (decorative anims) from the original plan: constant `kDecorativeAnims = false` in
+   Constants.h; `SetTheme` skips loading and ticking them. This also trims SetTheme time. Desktop shot
+   of level 0 before/after to confirm only the igloos/snowmen etc. are gone.
+E. Step 4 (music toggle) from the original plan. NOTE: the game's only playable music is
+   LoveTheme.ogg (title menus); AtomicTank.mo3 is skipped. So the toggle affects the menu music
+   today. Still implement it as planned (pause menu + title, settings.ini), so it works when MO3 music
+   is added. Do not attempt MO3/OGG conversion.
+Then build the instrumented VPK (HW_PERF=1) and report boot time lap numbers from a desktop run.
+Call opus-reviewer for the thread work (B) if anything is unclear.

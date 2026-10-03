@@ -34,6 +34,15 @@ A native **PlayStation Vita** source port of PopCap Games' classic arcade side-s
 
 This port follows the **Bring-Your-Own-Game (BYOG)** standard. You must provide the data files from your legally purchased copy of *Heavy Weapon Deluxe* (e.g. from Steam).
 
+### Requirements
+
+* A **hacked PS Vita / PS TV** running custom firmware (e.g. [HENkaku / Ensō](https://enso.henkaku.xyz/)) with **VitaShell** installed, so you can install unsafe homebrew VPKs.
+* **`libshacccg.suprx`** (the Sony runtime shader compiler) at `ur0:data/libshacccg.suprx`. VitaGL compiles its shaders at runtime and the game will crash at launch without it. If you have never run a commercial game or the PlayStation Mobile / Adrenaline apps, you won't have it. Install it by running the [**ShaRKBR33D**](https://github.com/Rinnegatamante/ShaRKBR33D/releases) homebrew (it extracts the file from your own Vita firmware). If you have previously set this up for other VitaGL ports, you already have it.
+
+**Not required:** this port is a native build (not an Android `.so` loader), so **kubridge** and **repatch** are *not* needed. If you already have them installed for other ports, they do no harm.
+
+### Install
+
 1. Install `HeavyWeaponDeluxe.vpk` on your PS Vita using VitaShell.
 2. Obtain your legal copy of *Heavy Weapon Deluxe* on PC.
 3. Copy the game's asset directories onto your PS Vita into `ux0:data/heavyweapon/`:

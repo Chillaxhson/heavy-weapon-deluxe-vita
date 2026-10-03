@@ -110,3 +110,38 @@ After step 1, stop and report the numbers; I will decide whether the 20 s needs 
 - Preloading all craft sprites raises GPU/RAM use; textures keep a CPU copy for per-pixel
   collision. Vita has 512 MB total, so check Step 1 memory log (`SDL_GetPerformanceCounter` is not
   enough; log the texture count and the sum of w*h*4) before preloading everything.
+
+---
+# Addendum: Vita perf.log results (log/perf.log, 3 missions) — Opus
+
+Measured, not guessed:
+- Steady state is perfect: 100.0 ticks/s, Board::Update 0.2-2 ms, frames 16.8 ms.
+- ALL stalls are first-use texture loads inside Board::Update/Draw (e.g. crates 448 ms, tracks 431 ms,
+  explosion 595 ms, gun 570 ms, bullets 473 ms). 110 loads = 36 s total. Laser/power-up lag = the
+  lasers/crates sprites loading when first needed.
+- 27 of those 36 s (75%) is `Vfs::Resolve`, not decoding. A miss costs 5-8 ms in a flat dir and
+  ~58 ms in `Images/` (large directory), and each texture does ~10 of them. Decode+upload is the
+  other ~9 s (about 80 ms avg; big sheets 100-300 ms: explosion 3200x160, gun 1680x250).
+- `StartLevel` = 1.6-1.8 s (SetTheme 1.4-1.6 s: plane + anim loads, same cause).
+- The "20 s unresponsive" = GET READY (300 ticks) stretched by these stalls: the first play second
+  ran only 19 ticks (4.1 s frame), the next ~29/s, and so on. Not a slow simulation.
+- Memory is a non-issue: 12.3 MB for 48 textures.
+
+Conclusions / changes to the plan:
+1. Step 2a (VFS memoization + one-time directory listing cache) is now THE fix and goes first.
+   Expected: every texture load drops by ~75%. Pre-build the listing for `Images/`, `Images/Anims/`,
+   `Images/Backgrounds/`, `Fonts/`, `Sounds/`, `Music/` lazily on first access; a missing file is then a
+   hash miss, no syscalls. Also cache the *search-root* decision (which of ux0:/app0:/... holds the
+   file): resolve against the first root whose listing contains the first path component.
+2. Step 2e (preload) is now mandatory, and since memory is cheap preload aggressively: at StartLevel
+   load, behind a plain "LOADING" frame (draw one frame of the sky first so the screen isn't black,
+   before the heavy work): every image in `sImageMetaTable` (TextureManager.cpp) EXCEPT menu/armory
+   screens, all craft/boss/weapon/effect sheets. Do NOT hand-curate a list per level; the
+   table is the list. Budget it: after 2a this should be a couple of seconds, once per app run
+   (textures stay cached across missions; only theme planes/anims change). Also run it once at boot
+   behind the existing title screen if easy, so the first mission costs nothing.
+3. Step 2f: preload all 92 sounds at boot (they are already partly loaded at start).
+4. Step 3 (drop decorative anims) is still worth it for SetTheme time, but ranks below the above.
+5. Keep HW_PERF instrumentation; after step 2, re-run on the Vita and compare. Target: StartLevel
+   < 300 ms after first run, zero `Load miss` lines after GET READY begins, no frame > 40 ms.
+   Add a summary line at the end of preload: textures loaded, total ms.

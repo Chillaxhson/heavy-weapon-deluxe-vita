@@ -29,6 +29,7 @@ struct InputState {
     bool pausePressed = false;
     bool confirmPressed = false;
     bool cancelPressed = false;
+    bool musicTogglePressed = false;   // SELECT on Vita, Tab on desktop
 
     // Window close / app exit requested
     bool quitRequested = false;
@@ -60,6 +61,7 @@ private:
     static bool sPrevPause;
     static bool sPrevConfirm;
     static bool sPrevCancel;
+    static bool sPrevMusic;
     static bool sPrevUp;
     static bool sPrevDown;
     static bool sPrevLeft;

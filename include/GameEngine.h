@@ -77,6 +77,7 @@ private:
     void UpdateMissionSelect(float dt);
     void UpdatePlaying(float dt);
     void UpdateArmory(float dt);
+    void ToggleMusic();
     void UpdatePaused(float dt);
     void UpdateGameOver(float dt);
 

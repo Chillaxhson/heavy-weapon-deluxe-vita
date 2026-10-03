@@ -138,6 +138,10 @@ public:
     // Music
     static void PlayMusic(const std::string& path, bool loop = true);
     static void StopMusic();
+    // Background music on/off. When off, PlayMusic remembers the request but loads nothing;
+    // turning it back on starts the most recently requested track. SFX are unaffected.
+    static void SetMusicEnabled(bool on);
+    static bool IsMusicEnabled() { return sMusicEnabled; }
     static void PauseMusic();
     static void ResumeMusic();
 
@@ -149,6 +153,9 @@ private:
     static std::unordered_set<std::string> sMissingSounds;
     static Mix_Music* sCurrentMusic;
     static int sMusicVolume;
+    static bool sMusicEnabled;
+    static std::string sMusicRequest;
+    static bool sMusicRequestLoop;
     static int sSfxVolume;
     static int sEngineChannel;
     static int sCooldown[SND_COUNT];

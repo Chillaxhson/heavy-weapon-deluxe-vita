@@ -114,6 +114,9 @@ std::unordered_map<std::string, Mix_Chunk*> AudioSystem::sSounds;
 std::unordered_set<std::string> AudioSystem::sMissingSounds;
 Mix_Music* AudioSystem::sCurrentMusic = nullptr;
 int AudioSystem::sMusicVolume = 100;
+bool AudioSystem::sMusicEnabled = true;
+std::string AudioSystem::sMusicRequest;
+bool AudioSystem::sMusicRequestLoop = true;
 int AudioSystem::sSfxVolume = 100;
 int AudioSystem::sEngineChannel = -1;
 SDL_mutex* AudioSystem::sSoundMutex = nullptr;
@@ -332,8 +335,21 @@ void AudioSystem::UpdateEngineSound(bool moving) {
     }
 }
 
+void AudioSystem::SetMusicEnabled(bool on) {
+    if (on == sMusicEnabled) return;
+    sMusicEnabled = on;
+    if (!on) {
+        StopMusic();
+    } else if (!sMusicRequest.empty()) {
+        PlayMusic(sMusicRequest, sMusicRequestLoop);
+    }
+}
+
 void AudioSystem::PlayMusic(const std::string& path, bool loop) {
     StopMusic();
+    sMusicRequest = path;
+    sMusicRequestLoop = loop;
+    if (!sMusicEnabled) return;   // nothing is loaded while music is off
 
     // MO3 (tracker module with compressed samples) cannot be decoded by this build; trying
     // only wasted load time. Skip it (CONTEXT.md).

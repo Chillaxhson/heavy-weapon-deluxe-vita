@@ -14,6 +14,7 @@ bool InputManager::sPrevFireMegalaser = false;
 bool InputManager::sPrevPause = false;
 bool InputManager::sPrevConfirm = false;
 bool InputManager::sPrevCancel = false;
+bool InputManager::sPrevMusic = false;
 bool InputManager::sPrevUp = false;
 bool InputManager::sPrevDown = false;
 bool InputManager::sPrevLeft = false;
@@ -48,6 +49,7 @@ void InputManager::Update() {
     sState.pausePressed = false;
     sState.confirmPressed = false;
     sState.cancelPressed = false;
+    sState.musicTogglePressed = false;
     sState.upPressed = false;
     sState.downPressed = false;
     sState.leftPressed = false;
@@ -106,6 +108,7 @@ void InputManager::Update() {
     bool btnPause = false;
     bool btnConfirm = false;
     bool btnCancel = false;
+    bool btnMusic = false;
     bool btnUp = false;
     bool btnDown = false;
     bool btnLeft = false;
@@ -171,6 +174,7 @@ void InputManager::Update() {
         btnPause = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_START);
         btnConfirm = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_A);
         btnCancel = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_B);
+        btnMusic = SDL_GameControllerGetButton(sController, SDL_CONTROLLER_BUTTON_BACK);   // SELECT
     }
 
 #ifndef __vita__
@@ -189,6 +193,7 @@ void InputManager::Update() {
     btnConfirm |= keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
     btnCancel |= keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
     btnPause |= keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_P];
+    btnMusic |= keys[SDL_SCANCODE_TAB];
     sMouseRightPulse = false;
 
     // A gamepad or keyboard aim overrides the mouse until it moves again.
@@ -208,6 +213,7 @@ void InputManager::Update() {
     if (btnPause && !sPrevPause) sState.pausePressed = true;
     if (btnConfirm && !sPrevConfirm) sState.confirmPressed = true;
     if (btnCancel && !sPrevCancel) sState.cancelPressed = true;
+    if (btnMusic && !sPrevMusic) sState.musicTogglePressed = true;
     if (btnUp && !sPrevUp) sState.upPressed = true;
     if (btnDown && !sPrevDown) sState.downPressed = true;
     if (btnLeft && !sPrevLeft) sState.leftPressed = true;
@@ -220,6 +226,7 @@ void InputManager::Update() {
     sPrevPause = btnPause;
     sPrevConfirm = btnConfirm;
     sPrevCancel = btnCancel;
+    sPrevMusic = btnMusic;
     sPrevUp = btnUp;
     sPrevDown = btnDown;
     sPrevLeft = btnLeft;

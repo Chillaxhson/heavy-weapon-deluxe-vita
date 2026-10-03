@@ -4,6 +4,7 @@
 #include "Perf.h"
 #include "game/Bosses.h"
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <algorithm>
 #include <sstream>
@@ -12,6 +13,47 @@
 namespace HeavyWeapon {
 
 GameEngine::GameEngine() {}
+
+// ---- settings.ini (music=0|1) ------------------------------------------------------
+#ifdef __vita__
+static const char* kSettingsPath = "ux0:data/heavyweapon/settings.ini";
+#else
+static const char* kSettingsPath = "./settings.ini";
+#endif
+
+// Missing or corrupt file means defaults (music on).
+static bool LoadMusicSetting() {
+    bool on = true;
+    if (FILE* f = fopen(kSettingsPath, "r")) {
+        char line[128];
+        while (fgets(line, sizeof(line), f)) {
+            int v;
+            if (sscanf(line, " music = %d", &v) == 1) on = (v != 0);
+        }
+        fclose(f);
+    }
+    return on;
+}
+
+static void SaveMusicSetting(bool on) {
+    if (FILE* f = fopen(kSettingsPath, "w")) {
+        fprintf(f, "music=%d\n", on ? 1 : 0);
+        fclose(f);
+    }
+}
+
+void GameEngine::ToggleMusic() {
+    bool on = !AudioSystem::IsMusicEnabled();
+    AudioSystem::SetMusicEnabled(on);
+    SaveMusicSetting(on);
+    AudioSystem::PlaySound("buttondown", 0.5f);
+}
+
+static const char* MusicLabel() { return AudioSystem::IsMusicEnabled() ? "MUSIC: ON" : "MUSIC: OFF"; }
+// Touch hit-boxes (logical 640x480): the black oval on the title art, and a line on the pause screen.
+static bool InRect(float x, float y, float rx, float ry, float rw, float rh) {
+    return x >= rx && x < rx + rw && y >= ry && y < ry + rh;
+}
 
 // Boot loading screen: backdrop + "LOADING" + a progress bar, presented at most every ~100 ms
 // so the screen never looks frozen but presenting stays cheap.
@@ -86,6 +128,7 @@ bool GameEngine::Init(SDL_Window* window, const LaunchOptions& opts) {
     mInitialized = true;
     FontRenderer::Init();
     AudioSystem::Init();
+    AudioSystem::SetMusicEnabled(LoadMusicSetting());
     InputManager::Init();
 
     // Load game definitions
@@ -217,6 +260,12 @@ void GameEngine::UpdateTitle(float dt) {
         mMenuSelection = MENU_HEROES;
     } else if (input.leftPressed && !kMenuButtons[mMenuSelection].big) {
         mMenuSelection = MENU_MISSION;
+    }
+
+    if (input.musicTogglePressed ||
+        (input.touchPressed && InRect(input.touchX, input.touchY, 385.0f, 35.0f, 220.0f, 70.0f))) {
+        ToggleMusic();
+        return;
     }
 
     bool activate = input.confirmPressed;
@@ -499,7 +548,10 @@ void GameEngine::UpdateArmory(float dt) {
 void GameEngine::UpdatePaused(float dt) {
     (void)dt;
     const InputState& input = InputManager::GetState();
-    if (input.pausePressed || input.confirmPressed) {
+    if (input.musicTogglePressed ||
+        (input.touchPressed && InRect(input.touchX, input.touchY, 170.0f, 325.0f, 300.0f, 40.0f))) {
+        ToggleMusic();
+    } else if (input.pausePressed || input.confirmPressed) {
         mState = STATE_PLAYING;
     } else if (input.cancelPressed) {
         mState = STATE_TITLE;
@@ -565,6 +617,9 @@ void GameEngine::RenderTitle() {
         Renderer::DrawCel(hlTex, 0, 0, sel.cx, sel.cy, true);
         Renderer::SetAdditiveBlend(false);
     }
+
+    // Music toggle readout in the empty black slot of the title art (SELECT or tap it).
+    FontRenderer::DrawString("Normal", MusicLabel(), 495.0f, 55.0f, { 0.3f, 1.0f, 0.3f, 1.0f }, 1.0f, ALIGN_CENTER);
 }
 
 void GameEngine::RenderMissionSelect() {
@@ -666,6 +721,8 @@ void GameEngine::RenderPaused() {
     Renderer::DrawFillRect(0.0f, 0.0f, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT, { 0.0f, 0.0f, 0.0f, 0.65f });
     FontRenderer::DrawString("RubberStampLET42", "PAUSED", SCREEN_WIDTH * 0.5f, 210.0f, { 1.0f, 1.0f, 1.0f, 1.0f }, 1.0f, ALIGN_CENTER);
     FontRenderer::DrawString("Normal", "START: RESUME    CIRCLE: RETIRE TO TITLE", SCREEN_WIDTH * 0.5f, 290.0f, { 0.85f, 0.85f, 0.85f, 1.0f }, 1.0f, ALIGN_CENTER);
+    std::string music = std::string(MusicLabel()) + "   (SELECT)";
+    FontRenderer::DrawString("Normal", music, SCREEN_WIDTH * 0.5f, 335.0f, { 0.85f, 0.85f, 0.85f, 1.0f }, 1.0f, ALIGN_CENTER);
 }
 
 void GameEngine::RenderGameOver() {
